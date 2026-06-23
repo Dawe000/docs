@@ -1,0 +1,235 @@
+---
+title: "Events API — List and Retrieve ag0 Events"
+sidebarTitle: "Events"
+description: "Query the ag0 events log to retrieve resource lifecycle events. Filter by type, resource, and date range."
+---
+
+Events are immutable records of resource state changes in ag0. Every time a resource is created, updated, or deleted, ag0 automatically generates a corresponding event and appends it to your account's event log. You can query this log to audit activity, trigger downstream workflows, or debug issues.
+
+<Note>
+  Events are retained for **90 days** from the time they are created. After this window, events are permanently removed and can no longer be retrieved via the API. If you need long-term retention, consider forwarding events to your own data store using [Webhooks](/api/endpoints/webhooks).
+</Note>
+
+---
+
+## GET /v1/events
+
+List events across your account, returned in reverse chronological order. Use the filter parameters to narrow results by resource, event type, or date range.
+
+### Query parameters
+
+<ParamField query="limit" type="integer" default={20}>
+  The maximum number of events to return per page. Accepts values between `1` and `100`.
+</ParamField>
+
+<ParamField query="cursor" type="string">
+  A pagination cursor returned in a previous response as `next_cursor`. Pass this value to retrieve the next page of results.
+</ParamField>
+
+<ParamField query="resource_id" type="string">
+  Filter events to those associated with a specific resource (e.g. `res_abc123`).
+</ParamField>
+
+<ParamField query="type" type="string">
+  Filter events by type. Accepted values:
+  - `resource.created` — a new resource was created
+  - `resource.updated` — an existing resource was modified
+  - `resource.deleted` — a resource was permanently deleted
+</ParamField>
+
+<ParamField query="since" type="string">
+  Return only events created at or after this timestamp. Must be a valid [ISO 8601](https://www.iso.org/iso-8601-date-and-time-format.html) datetime string (e.g. `2024-11-01T00:00:00Z`).
+</ParamField>
+
+<ParamField query="until" type="string">
+  Return only events created before or at this timestamp. Must be a valid ISO 8601 datetime string (e.g. `2024-11-30T23:59:59Z`).
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/events \
+  -H "Authorization: Bearer ag0_sk_abc123" \
+  -G \
+  --data-urlencode "limit=3" \
+  --data-urlencode "resource_id=res_abc123" \
+  --data-urlencode "type=resource.updated" \
+  --data-urlencode "since=2024-11-01T00:00:00Z"
+```
+
+### Example response
+
+```json
+{
+  "data": [
+    {
+      "id": "evt_xyz789",
+      "type": "resource.updated",
+      "resource_id": "res_abc123",
+      "data": {
+        "id": "res_abc123",
+        "type": "deployment",
+        "name": "production-api-v2",
+        "status": "active",
+        "metadata": {
+          "region": "us-east-1",
+          "version": "3.0.0"
+        },
+        "created_at": "2024-09-01T10:00:00Z",
+        "updated_at": "2024-12-01T09:15:44Z"
+      },
+      "created_at": "2024-12-01T09:15:44Z"
+    },
+    {
+      "id": "evt_uvw456",
+      "type": "resource.updated",
+      "resource_id": "res_abc123",
+      "data": {
+        "id": "res_abc123",
+        "type": "deployment",
+        "name": "production-api",
+        "status": "active",
+        "metadata": {
+          "region": "us-east-1",
+          "version": "2.4.0"
+        },
+        "created_at": "2024-09-01T10:00:00Z",
+        "updated_at": "2024-11-15T08:32:11Z"
+      },
+      "created_at": "2024-11-15T08:32:11Z"
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null
+}
+```
+
+### Response fields
+
+<ResponseField name="data" type="array">
+  An array of event objects matching your query.
+
+  <Expandable title="Event object fields">
+    <ResponseField name="id" type="string">
+      The unique identifier for the event (e.g. `evt_xyz789`).
+    </ResponseField>
+
+    <ResponseField name="type" type="string">
+      The event type. One of `resource.created`, `resource.updated`, or `resource.deleted`.
+    </ResponseField>
+
+    <ResponseField name="resource_id" type="string">
+      The identifier of the resource this event is associated with.
+    </ResponseField>
+
+    <ResponseField name="data" type="object">
+      A full snapshot of the resource at the time the event occurred. For `resource.deleted` events, this reflects the resource's final state before deletion.
+    </ResponseField>
+
+    <ResponseField name="created_at" type="string">
+      The ISO 8601 timestamp at which the event was recorded.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="has_more" type="boolean">
+  `true` if there are additional pages of results available.
+</ResponseField>
+
+<ResponseField name="next_cursor" type="string | null">
+  A cursor you can pass to the next request to retrieve the following page. `null` when you have reached the last page.
+</ResponseField>
+
+---
+
+## GET /v1/events/\{id\}
+
+Retrieve a single event by its unique identifier.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the event to retrieve (e.g. `evt_xyz789`).
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/events/evt_xyz789 \
+  -H "Authorization: Bearer ag0_sk_abc123"
+```
+
+### Example response
+
+```json
+{
+  "id": "evt_xyz789",
+  "type": "resource.updated",
+  "resource_id": "res_abc123",
+  "data": {
+    "id": "res_abc123",
+    "type": "deployment",
+    "name": "production-api-v2",
+    "status": "active",
+    "metadata": {
+      "region": "us-east-1",
+      "version": "3.0.0"
+    },
+    "created_at": "2024-09-01T10:00:00Z",
+    "updated_at": "2024-12-01T09:15:44Z"
+  },
+  "created_at": "2024-12-01T09:15:44Z"
+}
+```
+
+### Response fields
+
+<ResponseField name="id" type="string">
+  The unique identifier for the event.
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  The event type. One of `resource.created`, `resource.updated`, or `resource.deleted`.
+</ResponseField>
+
+<ResponseField name="resource_id" type="string">
+  The identifier of the resource this event is associated with.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  A full snapshot of the resource at the time the event occurred.
+
+  <Expandable title="Resource snapshot fields">
+    <ResponseField name="id" type="string">
+      The resource's unique identifier.
+    </ResponseField>
+
+    <ResponseField name="type" type="string">
+      The resource type (e.g. `deployment`, `integration`).
+    </ResponseField>
+
+    <ResponseField name="name" type="string">
+      The human-readable name of the resource at the time of the event.
+    </ResponseField>
+
+    <ResponseField name="status" type="string">
+      The resource status at the time of the event.
+    </ResponseField>
+
+    <ResponseField name="metadata" type="object">
+      The resource metadata at the time of the event.
+    </ResponseField>
+
+    <ResponseField name="created_at" type="string">
+      The ISO 8601 timestamp when the resource was originally created.
+    </ResponseField>
+
+    <ResponseField name="updated_at" type="string">
+      The ISO 8601 timestamp of the most recent update to the resource at the time of the event.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  The ISO 8601 timestamp at which the event was recorded.
+</ResponseField>

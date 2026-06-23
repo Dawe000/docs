@@ -1,0 +1,132 @@
+---
+title: "Authenticate API Requests to ag0"
+sidebarTitle: "Authentication"
+description: "All ag0 API requests require a valid API key. Pass your key as a Bearer token in the Authorization header of every request."
+---
+
+Every request you make to the ag0 API must include a valid API key. ag0 uses API keys rather than session tokens so your integrations are stateless and easy to rotate. Your key identifies your account, enforces your rate limits, and determines which actions you are authorized to perform based on its scopes.
+
+<Warning>
+  Treat your API keys like passwords. Never commit them to source control, expose them in client-side code, or log them in plaintext. Use environment variables or a secrets manager to store them securely.
+</Warning>
+
+## API Key Format
+
+ag0 API keys come in two variants, each with a distinct prefix so you can identify them at a glance:
+
+| Prefix | Type | Access Level |
+|---|---|---|
+| `ag0_sk_` | Secret key | Full read and write access (subject to assigned scopes) |
+| `ag0_ro_` | Read-only key | Read-only access across all resources — cannot create, update, or delete |
+
+**Example secret key:**
+```
+ag0_sk_abc123xyz7pLmNqRsTuVwXyZ9aBcDeF0
+```
+
+**Example read-only key:**
+```
+ag0_ro_def456uvw2kMnOpQrStUvWx8yZaBcDgH1
+```
+
+Keys are 40 characters long after the prefix and are generated using cryptographically secure randomness. You cannot reconstruct a key after its initial creation — if you lose it, you must rotate it.
+
+## Passing Your Key
+
+Include your API key as a `Bearer` token in the `Authorization` header of every HTTP request.
+
+<CodeGroup>
+
+```bash curl
+curl --request GET \
+  --url https://api.ag0.io/v1/resources \
+  --header "Authorization: Bearer ag0_sk_abc123xyz7pLmNqRsTuVwXyZ9aBcDeF0" \
+  --header "Accept: application/json"
+```
+
+```python Python
+import os
+import requests
+
+api_key = os.environ["AG0_API_KEY"]  # e.g. ag0_sk_abc123xyz...
+
+response = requests.get(
+    "https://api.ag0.io/v1/resources",
+    headers={
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+    },
+)
+
+data = response.json()
+print(data)
+```
+
+```javascript Node.js
+import fetch from "node-fetch";
+
+const apiKey = process.env.AG0_API_KEY; // e.g. ag0_sk_abc123xyz...
+
+const response = await fetch("https://api.ag0.io/v1/resources", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+  },
+});
+
+const data = await response.json();
+console.log(data);
+```
+
+</CodeGroup>
+
+<Tip>
+  Store your key in an environment variable (e.g. `AG0_API_KEY`) and read it at runtime. This keeps secrets out of your codebase and makes key rotation as simple as updating the environment variable.
+</Tip>
+
+## Authentication Errors
+
+When authentication fails, the API returns a `4xx` status code with a JSON error body.
+
+| Status | Code | Cause |
+|---|---|---|
+| `401 Unauthorized` | `missing_api_key` | No `Authorization` header was provided |
+| `401 Unauthorized` | `invalid_api_key` | The key is malformed, expired, or has been revoked |
+| `403 Forbidden` | `insufficient_scope` | The key is valid but lacks the scope required for this action |
+
+**Example error response:**
+
+```json
+{
+  "error": {
+    "code": "invalid_api_key",
+    "message": "The API key provided is invalid or has been revoked.",
+    "docs_url": "https://docs.ag0.io/api/authentication"
+  }
+}
+```
+
+If you receive a `403`, check that the key you are using has the required scope for the endpoint you are calling. See [Key Scopes](#key-scopes) below.
+
+## Key Scopes
+
+Scopes let you follow the principle of least privilege — create keys that can only access what they need. When you generate a key in the ag0 dashboard, you select one or more scopes to assign to it.
+
+| Scope | Description |
+|---|---|
+| `resources:read` | List and retrieve resources |
+| `resources:write` | Create, update, and delete resources |
+| `webhooks:read` | List and retrieve webhook configurations |
+| `webhooks:write` | Create, update, and delete webhook endpoints |
+| `events:read` | Query and stream events from your integrations |
+
+<Note>
+  Read-only keys (prefixed `ag0_ro_`) are automatically restricted to `*:read` scopes regardless of what is configured in the dashboard — they can never be used to modify data.
+</Note>
+
+A secret key (`ag0_sk_`) with all five scopes has full platform access. A key with only `events:read` can query events but cannot, for example, create a new resource — that request would return `403 Forbidden` with code `insufficient_scope`.
+
+---
+
+To learn how to create, rotate, and revoke API keys in the ag0 dashboard, see the [API Keys management guide](/authentication).

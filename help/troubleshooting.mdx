@@ -1,0 +1,294 @@
+---
+title: "Troubleshoot Common ag0 Integration Issues"
+sidebarTitle: "Troubleshooting"
+description: "Diagnose and fix common ag0 issues including authentication errors, rate limiting, webhook delivery failures, and unexpected API responses."
+---
+
+Even well-built integrations hit snags. This guide walks you through the most common ag0 issues — what causes them, how to confirm the diagnosis, and exactly what to do to fix them. Work through the relevant section below and you'll have most problems resolved in minutes.
+
+---
+
+## Authentication errors
+
+Authentication errors mean ag0 couldn't verify your identity. Check the status code first — it tells you whether the key is missing/invalid or whether it simply lacks the right permissions.
+
+| Status Code      | Error Code              | Cause                                                         | Fix                                                                                                           |
+|------------------|-------------------------|---------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| `401 Unauthorized` | `invalid_api_key`      | The API key is missing, malformed, or has been revoked.       | Confirm the `Authorization` header is set to `Bearer <your_key>`. Verify the key is active in **Settings → API Keys**. |
+| `403 Forbidden`    | `insufficient_scope`   | The key exists and is valid, but lacks a required permission. | Edit the key in **Settings → API Keys** and enable the missing scope, or create a new key with the correct scopes. |
+
+A typical `401` response looks like this:
+
+```json
+{
+  "error": "invalid_api_key",
+  "message": "The API key provided is missing or invalid.",
+  "docs": "https://docs.ag0.dev/api/authentication"
+}
+```
+
+**Quick checklist:**
+
+- Are you sending the header as `Authorization: Bearer <key>` — not `Token` or `Basic`?
+- Are there extra spaces or newline characters in the key value? This is common when copying from terminals.
+- Did you accidentally use a sandbox key against the production endpoint (or vice versa)?
+
+---
+
+## Rate limiting (429)
+
+When you send more requests than your plan allows within a given window, ag0 returns `429 Too Many Requests`.
+
+```json
+{
+  "error": "rate_limit_exceeded",
+  "message": "You have exceeded your request quota. Please retry after the reset window.",
+  "retry_after": 30
+}
+```
+
+The response headers give you precise information about your current quota:
+
+```
+X-RateLimit-Limit: 600
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1714000860
+Retry-After: 30
+```
+
+- **`X-RateLimit-Limit`** — your total allowed requests per minute.
+- **`X-RateLimit-Remaining`** — how many requests you have left in the current window.
+- **`X-RateLimit-Reset`** — the Unix timestamp when the window resets.
+- **`Retry-After`** — seconds to wait before retrying (always respect this value).
+
+Implement **exponential backoff with jitter** to handle 429s gracefully:
+
+```python
+import time
+import random
+import requests
+
+AG0_API_URL = "https://api.ag0.dev/v1/deployments"
+HEADERS = {"Authorization": f"Bearer {AG0_API_KEY}"}
+
+def fetch_with_backoff(url, headers, max_retries=5):
+    for attempt in range(max_retries):
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 429:
+            # Prefer the server-specified wait time; fall back to exponential backoff
+            retry_after = int(response.headers.get("Retry-After", 2 ** attempt))
+            jitter = random.uniform(0, 1)
+            wait = retry_after + jitter
+            print(f"Rate limited (attempt {attempt + 1}). Waiting {wait:.2f}s...")
+            time.sleep(wait)
+            continue
+
+        response.raise_for_status()
+        return response.json()
+
+    raise RuntimeError("Exceeded maximum retry attempts due to rate limiting.")
+```
+
+**Long-term fixes:**
+- Batch related operations into fewer API calls.
+- Cache responses that don't change frequently (e.g., configuration objects).
+- Upgrade your plan if you routinely approach your limit. See [Plans & pricing](https://ag0.dev/pricing).
+
+---
+
+## Webhook delivery failures
+
+ag0 marks a delivery as failed when your endpoint returns a non-2xx status code or doesn't respond within **10 seconds**. ag0 retries up to five times with exponential backoff before marking the event as undelivered.
+
+**Common causes and fixes:**
+
+<AccordionGroup>
+
+  <Accordion title="Endpoint returns a non-2xx status">
+    ag0 treats any response outside the 2xx range as a failure — including redirects (3xx). Make sure your handler returns `200 OK` (or `204 No Content`) as soon as it receives and acknowledges the event. Do heavy processing asynchronously after returning the response.
+
+    ```python
+    from flask import Flask, request, jsonify
+
+    app = Flask(__name__)
+
+    @app.route("/webhooks/ag0", methods=["POST"])
+    def handle_webhook():
+        payload = request.get_json()
+        # Queue the job for async processing
+        queue.enqueue(process_event, payload)
+        # Respond immediately with 200
+        return jsonify({"status": "received"}), 200
+    ```
+  </Accordion>
+
+  <Accordion title="Endpoint times out">
+    If your handler takes longer than 10 seconds to respond, ag0 closes the connection and marks the delivery as failed. Move slow operations (database writes, third-party API calls) to a background queue and acknowledge the webhook immediately.
+  </Accordion>
+
+  <Accordion title="SSL certificate issues">
+    ag0 validates your endpoint's TLS certificate. Delivery will fail if:
+
+    - Your certificate is expired.
+    - You're using a self-signed certificate.
+    - The certificate chain is incomplete.
+
+    Run `curl -v https://your-endpoint.example.com/webhooks/ag0` to inspect your certificate. Use a tool like [SSL Labs](https://www.ssllabs.com/ssltest/) to check for chain issues. For local development, use a tunnel service such as [ngrok](https://ngrok.com) rather than a self-signed cert.
+  </Accordion>
+
+</AccordionGroup>
+
+**Viewing delivery logs and triggering a replay:**
+
+1. Go to **Dashboard → Settings → Webhooks**.
+2. Click on the relevant webhook endpoint.
+3. Select **Delivery Logs** to see every delivery attempt, the HTTP status your endpoint returned, and the full request payload.
+4. To retry a failed delivery manually, click the **Replay** button next to any event. You can replay events even after the automatic retry window has closed.
+
+---
+
+## Unexpected 400 errors
+
+A `400 Bad Request` means the request reached ag0 but was rejected because the payload was malformed or a required field was missing.
+
+```json
+{
+  "error": "validation_error",
+  "message": "The request body contains invalid or missing fields.",
+  "details": [
+    {
+      "field": "name",
+      "issue": "required field is missing"
+    },
+    {
+      "field": "config.region",
+      "issue": "must be one of: us-east-1, us-west-2, eu-west-1"
+    }
+  ]
+}
+```
+
+Always read both the top-level `error` and `message` fields for a plain-English summary, and the `details` array for field-level specifics. Each entry in `details` tells you exactly which field failed validation and why.
+
+**Common causes:**
+
+- Sending `Content-Type: application/x-www-form-urlencoded` instead of `application/json`.
+- Omitting required fields documented in the API reference.
+- Passing an invalid enum value (e.g., an unsupported region or plan name).
+- Sending an empty request body when a body is required.
+
+```bash
+# Always set Content-Type and send a valid JSON body
+curl -X POST https://api.ag0.dev/v1/deployments \
+  -H "Authorization: Bearer $AG0_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-app", "config": {"region": "us-east-1"}}'
+```
+
+---
+
+## Idempotency issues
+
+ag0 supports idempotent requests via the `Idempotency-Key` header. When you send a key ag0 has seen before, it returns the **cached response** from the original request — it does not process the request again.
+
+**What happens if you reuse a key with a different payload?**
+
+ag0 detects the mismatch and returns a `422 Unprocessable Entity` error:
+
+```json
+{
+  "error": "idempotency_key_conflict",
+  "message": "An idempotency key was reused with a different request body. Use a new key for a different request.",
+  "original_request_id": "req_01HZ9KXMV3BFJA7QRSWYT4PNED"
+}
+```
+
+Idempotency keys are scoped to your API key and expire after **24 hours**. Best practices:
+
+- Generate a new UUID for each **logically distinct** operation (e.g., per retry of the same operation — not per new operation).
+- Never reuse a key for a different payload.
+- Store the key alongside the operation in your database so you can safely replay it if the network drops before you receive a response.
+
+```python
+import uuid
+import requests
+
+idempotency_key = str(uuid.uuid4())  # Generate once per operation attempt
+
+response = requests.post(
+    "https://api.ag0.dev/v1/deployments",
+    headers={
+        "Authorization": f"Bearer {AG0_API_KEY}",
+        "Idempotency-Key": idempotency_key,
+        "Content-Type": "application/json",
+    },
+    json={"name": "my-app", "config": {"region": "us-east-1"}},
+)
+```
+
+---
+
+## Debugging tips
+
+When a problem is hard to reproduce or the error message isn't clear enough, these techniques will help you gather the raw data you need.
+
+**Use `curl -v` for verbose output**
+
+`curl -v` prints the full request and response — headers, body, TLS handshake, and timing — directly to your terminal:
+
+```bash
+curl -v -X GET https://api.ag0.dev/v1/deployments \
+  -H "Authorization: Bearer $AG0_API_KEY" \
+  -H "Content-Type: application/json"
+```
+
+Look for the `< HTTP/2` line for the status code and all `<` prefixed lines for response headers. The `*` lines show TLS and connection details.
+
+**Log raw requests and responses in your SDK**
+
+If you're using the ag0 SDK, enable debug logging to capture the raw HTTP traffic:
+
+```python
+import logging
+import ag0
+
+logging.basicConfig(level=logging.DEBUG)
+
+client = ag0.Client(api_key=AG0_API_KEY, debug=True)
+deployment = client.deployments.create(name="my-app")
+```
+
+```javascript
+const ag0 = require("@ag0/sdk");
+
+const client = new ag0.Client({
+  apiKey: process.env.AG0_API_KEY,
+  logLevel: "debug",
+});
+```
+
+**Capture the `X-Request-ID` header**
+
+Every ag0 API response includes a unique `X-Request-ID`. Log this value in your application:
+
+```
+X-Request-ID: req_01HZ9KXMV3BFJA7QRSWYT4PNED
+```
+
+When you contact support, providing this ID lets us locate the exact request in our infrastructure immediately — no guesswork required.
+
+**Use the dashboard event log**
+
+The **Dashboard → Logs → API Requests** view shows every request made with your API keys, including full request and response details. Filter by status code to quickly surface all errors within a time window.
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Frequently Asked Questions" icon="circle-question" href="/help/faq">
+    Browse common questions about account setup, API keys, rate limits, webhooks, and billing.
+  </Card>
+  <Card title="API Error Reference" icon="triangle-exclamation" href="/api/errors">
+    See the full list of ag0 error codes, their meanings, and recommended actions.
+  </Card>
+</CardGroup>

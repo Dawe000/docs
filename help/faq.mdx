@@ -1,0 +1,229 @@
+---
+title: "Frequently Asked Questions About ag0"
+sidebarTitle: "FAQ"
+description: "Find answers to common questions about ag0, including account setup, API keys, rate limits, webhooks, and billing."
+---
+
+ag0 is designed to get you up and running quickly — but questions still come up. This page covers the most common ones so you can unblock yourself without waiting for support. If you don't find what you're looking for here, check the [Troubleshooting guide](/help/troubleshooting) or reach out to the team directly.
+
+<AccordionGroup>
+
+  <Accordion title="What is ag0 and what can I use it for?">
+    ag0 is a developer platform that provides tools, APIs, and integrations for building and deploying modern applications. You can use it to:
+
+    - **Integrate data sources** — connect your services via REST APIs or pre-built integrations.
+    - **Automate workflows** — trigger actions and react to events using webhooks.
+    - **Deploy applications** — ship backend services and APIs with minimal configuration.
+    - **Monitor activity** — inspect logs, events, and request history from a unified dashboard.
+
+    Whether you're building a small side project or a production-grade service, ag0 scales with your needs.
+  </Accordion>
+
+  <Accordion title="How do I get an API key?">
+    You can generate an API key from the **Settings → API Keys** page in your ag0 dashboard.
+
+    1. Log in to your ag0 account.
+    2. Navigate to **Settings** → **API Keys**.
+    3. Click **Create new key**.
+    4. Give the key a descriptive name (e.g., `production-backend`).
+    5. Select the scopes your key needs, then click **Generate**.
+
+    Copy the key immediately — ag0 shows it only once. Store it in a secure location such as an environment variable or a secrets manager. Never hard-code keys in your source code.
+
+    ```bash
+    # Set your key as an environment variable
+    export AG0_API_KEY="your_api_key_here"
+    ```
+  </Accordion>
+
+  <Accordion title="How many API keys can I create?">
+    The number of API keys you can create depends on your plan:
+
+    | Plan       | API Keys |
+    |------------|----------|
+    | Free       | 2        |
+    | Pro        | 10       |
+    | Team       | 50       |
+    | Enterprise | Unlimited |
+
+    We recommend creating separate keys for each environment (development, staging, production) and each service that calls the ag0 API. This makes it easy to rotate or revoke a single key without affecting your entire system.
+  </Accordion>
+
+  <Accordion title="What are the API rate limits?">
+    ag0 enforces rate limits per API key to keep the platform stable for everyone. The default limits are:
+
+    | Plan       | Requests / minute | Requests / day |
+    |------------|-------------------|----------------|
+    | Free       | 60                | 1,000          |
+    | Pro        | 600               | 50,000         |
+    | Team       | 3,000             | 500,000        |
+    | Enterprise | Custom            | Custom         |
+
+    Every API response includes headers that show your current usage:
+
+    ```
+    X-RateLimit-Limit: 600
+    X-RateLimit-Remaining: 543
+    X-RateLimit-Reset: 1714000860
+    ```
+
+    If you need higher limits, upgrade your plan or contact us to discuss a custom arrangement.
+  </Accordion>
+
+  <Accordion title="How do I handle rate limit errors (429)?">
+    When you exceed your rate limit, ag0 returns an HTTP `429 Too Many Requests` response. The `Retry-After` header tells you how many seconds to wait before retrying.
+
+    ```json
+    {
+      "error": "rate_limit_exceeded",
+      "message": "You have exceeded your request quota. Please retry after the reset window.",
+      "retry_after": 30
+    }
+    ```
+
+    The best practice is to implement **exponential backoff with jitter**. Here's a simple Python example:
+
+    ```python
+    import time
+    import random
+    import requests
+
+    def call_ag0_api(url, headers, max_retries=5):
+        for attempt in range(max_retries):
+            response = requests.get(url, headers=headers)
+
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 2 ** attempt))
+                jitter = random.uniform(0, 1)
+                wait = retry_after + jitter
+                print(f"Rate limited. Retrying in {wait:.2f}s...")
+                time.sleep(wait)
+                continue
+
+            response.raise_for_status()
+            return response.json()
+
+        raise Exception("Max retries exceeded")
+    ```
+
+    For sustained high-volume workloads, consider batching requests or caching responses where possible.
+  </Accordion>
+
+  <Accordion title="Can I use ag0 in a test/sandbox environment?">
+    Yes. ag0 provides a **sandbox environment** that mirrors production but never processes real data or charges. To use it:
+
+    1. Create a separate API key scoped to the sandbox (toggle **Sandbox** when creating the key).
+    2. Point your requests to the sandbox base URL:
+
+    ```
+    https://sandbox.api.ag0.dev/v1
+    ```
+
+    Sandbox responses are structurally identical to production responses, so you can build and test your integration with confidence before going live. Webhook events fired in sandbox mode are delivered to your sandbox webhook endpoints only — they won't trigger production listeners.
+  </Accordion>
+
+  <Accordion title="What webhook event types are available?">
+    ag0 can deliver webhook notifications for a wide range of events. Common event types include:
+
+    | Event Type                  | Description                                      |
+    |-----------------------------|--------------------------------------------------|
+    | `deployment.created`        | A new deployment was initiated.                  |
+    | `deployment.succeeded`      | A deployment completed successfully.             |
+    | `deployment.failed`         | A deployment encountered an error.               |
+    | `integration.connected`     | A third-party integration was connected.         |
+    | `integration.disconnected`  | A third-party integration was removed.           |
+    | `api_key.rotated`           | An API key was rotated.                          |
+    | `alert.triggered`           | A configured alert threshold was crossed.        |
+
+    You can subscribe to specific event types — or use `*` to receive all events — when creating a webhook endpoint in **Settings → Webhooks**.
+  </Accordion>
+
+  <Accordion title="How do I verify webhook signatures?">
+    Every webhook request from ag0 includes an `X-AG0-Signature` header. You should always verify this signature before processing the payload to confirm the request genuinely came from ag0.
+
+    ag0 computes the signature using HMAC-SHA256 over the raw request body with your webhook secret as the key.
+
+    ```python
+    import hmac
+    import hashlib
+
+    def verify_signature(payload_bytes: bytes, secret: str, signature_header: str) -> bool:
+        expected = hmac.new(
+            secret.encode("utf-8"),
+            payload_bytes,
+            hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(f"sha256={expected}", signature_header)
+    ```
+
+    ```javascript
+    const crypto = require("crypto");
+
+    function verifySignature(payloadBuffer, secret, signatureHeader) {
+      const expected = "sha256=" + crypto
+        .createHmac("sha256", secret)
+        .update(payloadBuffer)
+        .digest("hex");
+      return crypto.timingSafeEqual(
+        Buffer.from(expected),
+        Buffer.from(signatureHeader)
+      );
+    }
+    ```
+
+    Always use a **timing-safe comparison** (like `hmac.compare_digest` or `timingSafeEqual`) to prevent timing attacks. Reject any request where the signature doesn't match.
+  </Accordion>
+
+  <Accordion title="How do I rotate my API key without downtime?">
+    Follow this zero-downtime rotation process:
+
+    1. **Create a new key** — Go to **Settings → API Keys** and generate a new key with the same scopes as your existing one.
+    2. **Deploy the new key** — Update your environment variables or secrets manager to include the new key. Deploy this change to your services.
+    3. **Verify traffic** — Monitor your dashboard and logs to confirm requests are succeeding with the new key.
+    4. **Revoke the old key** — Once you're confident all services are using the new key, return to **Settings → API Keys** and revoke the old one.
+
+    Because you deploy the new key before revoking the old one, there is no window where your services are without a valid key.
+  </Accordion>
+
+  <Accordion title="Where can I find my API request logs?">
+    You can inspect every API request made with your keys from the **Logs** section of the dashboard.
+
+    - Navigate to **Dashboard → Logs → API Requests**.
+    - Filter by date range, status code, endpoint, or API key.
+    - Click any entry to see the full request and response, including headers, body, and latency.
+
+    Logs are retained for **30 days** on the Free plan and **90 days** on Pro and above. For longer retention, refer to your dashboard's event log for full history and filtering options.
+  </Accordion>
+
+  <Accordion title="What happens if my webhook endpoint is down?">
+    ag0 automatically retries failed webhook deliveries using an exponential backoff schedule:
+
+    | Attempt | Delay   |
+    |---------|---------|
+    | 1st     | 30s     |
+    | 2nd     | 5 min   |
+    | 3rd     | 30 min  |
+    | 4th     | 2 hours |
+    | 5th     | 8 hours |
+
+    A delivery is considered failed if your endpoint returns a non-2xx status code or does not respond within **10 seconds**.
+
+    After 5 failed attempts, ag0 marks the event as **undelivered** and sends you an email notification. You can view undelivered events in **Settings → Webhooks → Delivery Logs** and trigger a manual replay at any time — even after the retry window closes.
+  </Accordion>
+
+  <Accordion title="How do I contact support?">
+    There are several ways to get help:
+
+    - **Documentation** — You're already here! Browse the guides, API reference, and troubleshooting pages.
+    - **Community forum** — Post questions and search answers at [community.ag0.dev](https://community.ag0.dev).
+    - **Email support** — Reach us at [support@ag0.dev](mailto:support@ag0.dev). Pro and Team plan customers receive a response within 1 business day; Enterprise customers have access to a dedicated Slack channel.
+    - **In-app chat** — Click the **Help** button in the bottom-right corner of your dashboard to start a live chat (available during business hours).
+
+    When you contact support, include your **account ID**, the **API key prefix** (first 8 characters only — never send the full key), and any relevant **request IDs** from the `X-Request-ID` response header. This helps us find your request in our logs quickly.
+  </Accordion>
+
+</AccordionGroup>
+
+<Note>
+  If you're experiencing a specific error or unexpected behavior, the [Troubleshooting guide](/help/troubleshooting) walks through authentication errors, rate limiting, webhook delivery failures, and more — with step-by-step diagnostics for each issue.
+</Note>

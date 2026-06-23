@@ -1,0 +1,117 @@
+---
+title: "Authenticate with ag0 Using API Keys"
+sidebarTitle: "Authentication"
+description: "ag0 uses API keys to authenticate requests. Learn how to create, rotate, and securely use your API key in every request."
+---
+
+ag0 authenticates every request using API keys passed as Bearer tokens in the `Authorization` header. There are no session cookies or OAuth flows required for direct API access — include your key in the header and ag0 handles the rest.
+
+## Getting your API key
+
+Follow these steps to generate a key from the ag0 dashboard:
+
+1. Log in to your account at [https://app.ag0.io](https://app.ag0.io).
+2. Click your avatar in the top-right corner and select **Settings**.
+3. Navigate to the **API Keys** tab.
+4. Click **New Key**.
+5. Enter a descriptive name for the key (for example, `production-server` or `ci-pipeline`).
+6. Select the appropriate scope (see [Key scopes and permissions](#key-scopes-and-permissions) below).
+7. Click **Create** and copy the key immediately.
+
+<Warning>
+  ag0 displays your API key **only once** at creation time. If you navigate away or close the dialog without copying it, you will need to delete the key and create a new one. There is no way to retrieve a key after it has been shown.
+</Warning>
+
+## Using your API key
+
+Pass your API key as a Bearer token in the `Authorization` header of every request.
+
+<CodeGroup>
+
+```bash curl
+curl -X GET https://api.ag0.io/v1/resources \
+  -H "Authorization: Bearer ag0_sk_abc123xyzDEF456uvwGHI789jkl" \
+  -H "Content-Type: application/json"
+```
+
+```python Python
+import requests
+
+api_key = "ag0_sk_abc123xyzDEF456uvwGHI789jkl"
+
+response = requests.get(
+    "https://api.ag0.io/v1/resources",
+    headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    },
+)
+
+print(response.json())
+```
+
+```javascript JavaScript
+const apiKey = "ag0_sk_abc123xyzDEF456uvwGHI789jkl";
+
+const response = await fetch("https://api.ag0.io/v1/resources", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+  },
+});
+
+const data = await response.json();
+console.log(data);
+```
+
+</CodeGroup>
+
+<Note>
+  Avoid hardcoding your API key directly in source code. Instead, load it from an environment variable:
+
+  ```bash
+  export AG0_API_KEY=your_key_here
+  ```
+
+  Then reference it in your code:
+
+  ```python Python
+  import os
+  api_key = os.environ["AG0_API_KEY"]
+  ```
+
+  ```javascript JavaScript
+  const apiKey = process.env.AG0_API_KEY;
+  ```
+</Note>
+
+## Key scopes and permissions
+
+When you create an API key, you choose one of two scopes:
+
+| Scope | Permissions |
+|---|---|
+| **Read-only** | Can retrieve resources (`GET` requests) but cannot create, update, or delete anything. Suitable for dashboards, monitoring scripts, and read-only integrations. |
+| **Read-write** | Full access to create, update, and delete resources. Required for automation pipelines and server-side applications that modify state. |
+
+Use the most restrictive scope that your use case allows. If a read-only key is sufficient, prefer it over a read-write key to limit the blast radius of an accidental exposure.
+
+## Rotating keys
+
+Rotate your API keys periodically and immediately when you suspect a key has been compromised. Follow this order to avoid downtime:
+
+1. Generate a **new key** in Settings → API Keys with the same scope as the key you're replacing.
+2. Update all services and environment variables to use the new key.
+3. Verify that your services are responding correctly with the new key.
+4. Return to Settings → API Keys, find the old key, and click **Delete**.
+
+Never delete the old key before your services are confirmed working with the new one.
+
+## Security best practices
+
+- **Never commit API keys to source control.** Add secrets files to `.gitignore` and use a secrets manager or environment variables instead.
+- **Use environment variables.** Store your key in `AG0_API_KEY` and load it at runtime rather than embedding it in code.
+- **Rotate keys periodically.** Establish a regular rotation schedule (for example, every 90 days) to limit exposure from keys that may have leaked undetected.
+- **Use scoped keys.** Create separate read-only keys for services that don't need write access, and create per-service keys so you can revoke a single service's access without affecting others.
+- **Audit key usage.** Review the API Keys page regularly to spot unfamiliar keys or unusual access patterns, and delete any keys that are no longer in use.

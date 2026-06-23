@@ -1,0 +1,251 @@
+---
+title: "ag0 API Error Codes and Responses"
+sidebarTitle: "Errors"
+description: "Reference for all ag0 API error codes. Understand HTTP status codes, error response format, and how to handle each error type."
+---
+
+ag0 uses standard HTTP status codes to signal the outcome of every API request. When a request fails, the response body always contains a consistent JSON error object with a machine-readable `code`, a human-readable `message`, and a link to the relevant documentation page. Building robust error handling against this structure lets you respond intelligently to every failure mode.
+
+## Error Response Format
+
+Every error response body follows the same shape regardless of the status code:
+
+```json
+{
+  "error": {
+    "code": "invalid_api_key",
+    "message": "The API key provided is invalid.",
+    "docs_url": "https://docs.ag0.io/api/errors"
+  }
+}
+```
+
+<ResponseField name="error" type="object" required>
+  The top-level error container.
+
+  <Expandable title="error fields">
+    <ResponseField name="code" type="string" required>
+      A stable, machine-readable string that uniquely identifies the error type. Use this field — not the HTTP status code alone — to drive conditional logic in your error handling.
+    </ResponseField>
+
+    <ResponseField name="message" type="string" required>
+      A human-readable description of what went wrong. This string may change over time; do not parse it programmatically.
+    </ResponseField>
+
+    <ResponseField name="docs_url" type="string">
+      A direct link to the documentation page most relevant to this error, where you can find troubleshooting steps and related guidance.
+    </ResponseField>
+
+    <ResponseField name="param" type="string">
+      When the error is caused by a specific request parameter (e.g. a validation failure), this field names the offending field. Absent if not applicable.
+    </ResponseField>
+
+    <ResponseField name="request_id" type="string">
+      A unique identifier for the request that produced the error. Include this value when contacting support — it lets the ag0 team trace the request in internal logs.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## HTTP Status Codes
+
+<AccordionGroup>
+
+  <Accordion title="400 Bad Request" icon="triangle-exclamation">
+    The request was malformed or failed schema validation. This typically means a required field is missing, a field value has the wrong type, or a string does not match an expected format.
+
+    **Example — missing required field:**
+    ```json
+    {
+      "error": {
+        "code": "validation_error",
+        "message": "The 'name' field is required.",
+        "param": "name",
+        "docs_url": "https://docs.ag0.io/api/resources",
+        "request_id": "req_01hx4kbz2nqrst8vwxy9m"
+      }
+    }
+    ```
+
+    Fix the request payload before retrying — repeating the same request will produce the same error.
+  </Accordion>
+
+  <Accordion title="401 Unauthorized" icon="lock">
+    The request did not include a valid API key, or the key has been revoked. Check that your `Authorization` header is present and uses the `Bearer <key>` format.
+
+    ```json
+    {
+      "error": {
+        "code": "invalid_api_key",
+        "message": "The API key provided is invalid or has been revoked.",
+        "docs_url": "https://docs.ag0.io/api/authentication",
+        "request_id": "req_01hx4kcd3nqrst8vwxy9p"
+      }
+    }
+    ```
+
+    See [Authentication](/api/authentication) for key formats and how to pass your key correctly.
+  </Accordion>
+
+  <Accordion title="403 Forbidden" icon="ban">
+    Your API key is valid but does not have the scope required to perform this action. For example, calling a write endpoint with a read-only key returns `403`.
+
+    ```json
+    {
+      "error": {
+        "code": "insufficient_scope",
+        "message": "This action requires the 'resources:write' scope.",
+        "docs_url": "https://docs.ag0.io/api/authentication#key-scopes",
+        "request_id": "req_01hx4kdf4nqrst8vwxy9q"
+      }
+    }
+    ```
+
+    Generate a new key with the required scope in the [ag0 dashboard](/authentication).
+  </Accordion>
+
+  <Accordion title="404 Not Found" icon="circle-question">
+    The resource you requested does not exist, or your key does not have access to it. ag0 returns `404` (rather than `403`) when the resource cannot be confirmed to exist, to avoid leaking information about resources belonging to other accounts.
+
+    ```json
+    {
+      "error": {
+        "code": "resource_not_found",
+        "message": "No resource with ID 'res_01hx4k2m9nqrst8vwxy3z' was found.",
+        "docs_url": "https://docs.ag0.io/api/resources",
+        "request_id": "req_01hx4keg5nqrst8vwxy9r"
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="409 Conflict" icon="arrows-rotate">
+    You submitted a request with an `Idempotency-Key` that was already used for a request with a *different* payload. ag0 cannot safely determine your intent, so it rejects the request.
+
+    ```json
+    {
+      "error": {
+        "code": "idempotency_key_conflict",
+        "message": "An earlier request with this Idempotency-Key had a different body.",
+        "docs_url": "https://docs.ag0.io/api/overview#idempotency",
+        "request_id": "req_01hx4kfh6nqrst8vwxy9s"
+      }
+    }
+    ```
+
+    Use a new UUID for `Idempotency-Key` if you intend to send a different payload.
+  </Accordion>
+
+  <Accordion title="422 Unprocessable Entity" icon="file-circle-xmark">
+    The request was well-formed and passed schema validation, but failed business logic validation. For example, trying to create a resource with a name that already exists in your account.
+
+    ```json
+    {
+      "error": {
+        "code": "name_already_exists",
+        "message": "A resource named 'my-connector' already exists in your account.",
+        "param": "name",
+        "docs_url": "https://docs.ag0.io/api/resources",
+        "request_id": "req_01hx4kgj7nqrst8vwxy9t"
+      }
+    }
+    ```
+
+    Resolve the business logic conflict (e.g. choose a different name) before retrying.
+  </Accordion>
+
+  <Accordion title="429 Too Many Requests" icon="gauge-high">
+    You have exceeded your rate limit of 1,000 requests per minute. The response includes a `Retry-After` header telling you how many seconds to wait before your next request.
+
+    ```http
+    HTTP/1.1 429 Too Many Requests
+    Retry-After: 12
+    X-RateLimit-Limit: 1000
+    X-RateLimit-Remaining: 0
+    X-RateLimit-Reset: 1710499260
+    ```
+
+    ```json
+    {
+      "error": {
+        "code": "rate_limit_exceeded",
+        "message": "You have exceeded the rate limit. Please retry after 12 seconds.",
+        "docs_url": "https://docs.ag0.io/api/overview#rate-limits",
+        "request_id": "req_01hx4khk8nqrst8vwxy9u"
+      }
+    }
+    ```
+
+    Implement exponential backoff in your retry logic. Contact [support@ag0.io](mailto:support@ag0.io) if you consistently hit rate limits in production.
+  </Accordion>
+
+  <Accordion title="500 Internal Server Error" icon="server">
+    An unexpected error occurred on ag0's side. This is not caused by your request — you can safely retry it using exponential backoff.
+
+    ```json
+    {
+      "error": {
+        "code": "internal_error",
+        "message": "An unexpected error occurred. Please try again or contact support if the issue persists.",
+        "docs_url": "https://docs.ag0.io/api/errors",
+        "request_id": "req_01hx4kjl9nqrst8vwxy9v"
+      }
+    }
+    ```
+
+    Include the `request_id` when filing a support request.
+  </Accordion>
+
+  <Accordion title="503 Service Unavailable" icon="circle-pause">
+    ag0 is temporarily unavailable due to planned maintenance or unexpected overload. Check the [ag0 status page](https://status.ag0.io) for real-time information. Retry with exponential backoff — the service typically recovers within minutes.
+
+    ```json
+    {
+      "error": {
+        "code": "service_unavailable",
+        "message": "The ag0 API is temporarily unavailable. Please retry shortly.",
+        "docs_url": "https://docs.ag0.io/api/errors",
+        "request_id": "req_01hx4kkm0nqrst8vwxy9w"
+      }
+    }
+    ```
+  </Accordion>
+
+</AccordionGroup>
+
+## Error Codes
+
+The following table lists all machine-readable `code` values returned by the ag0 API. Always branch on the `code` field for precise handling.
+
+| Code | HTTP Status | Description |
+|---|---|---|
+| `validation_error` | 400 | One or more request fields failed schema or format validation |
+| `invalid_request` | 400 | The request body is not valid JSON or is missing required structure |
+| `missing_api_key` | 401 | No `Authorization` header was included in the request |
+| `invalid_api_key` | 401 | The API key is malformed, expired, or has been revoked |
+| `insufficient_scope` | 403 | The API key lacks the required scope for this operation |
+| `resource_not_found` | 404 | The requested resource does not exist or is not accessible |
+| `endpoint_not_found` | 404 | The API path does not exist — check for typos in the URL |
+| `idempotency_key_conflict` | 409 | The `Idempotency-Key` was reused with a different request body |
+| `name_already_exists` | 422 | A resource with that name already exists in your account |
+| `state_conflict` | 422 | The operation cannot be performed in the resource's current state |
+| `rate_limit_exceeded` | 429 | You have exceeded your request rate limit |
+| `internal_error` | 500 | An unexpected server-side error occurred |
+| `service_unavailable` | 503 | The API is temporarily offline for maintenance or is overloaded |
+
+## Retrying Errors
+
+Not all errors are safe to retry. Use the following guidance to avoid hammering the API unnecessarily or masking bugs in your integration.
+
+| Status Range | Retry? | Strategy |
+|---|---|---|
+| `2xx` | No | Request succeeded — no retry needed |
+| `400`, `401`, `403`, `404`, `409`, `422` | **No** | These are client errors caused by your request. Retrying without fixing the root cause will always produce the same result. |
+| `429` | **Yes** | Wait the number of seconds specified in the `Retry-After` header, then retry. Use exponential backoff if `Retry-After` is absent. |
+| `500` | **Yes** | Retry with exponential backoff. The issue is on ag0's side and is usually transient. |
+| `503` | **Yes** | Retry with exponential backoff. Check [status.ag0.io](https://status.ag0.io) for maintenance windows. |
+
+**Recommended backoff formula:** wait `min(2^attempt * 100ms + jitter, 30s)` before each retry, capping at 30 seconds. This avoids thundering-herd problems when many clients encounter the same error simultaneously.
+
+<Note>
+  If you are seeing persistent `5xx` errors or unexpected `4xx` responses that you cannot resolve, visit the [help and troubleshooting guide](/help/troubleshooting) or reach out to [support@ag0.io](mailto:support@ag0.io) with the `request_id` from the error response.
+</Note>

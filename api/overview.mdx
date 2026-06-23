@@ -1,0 +1,156 @@
+---
+title: "ag0 REST API Reference Overview"
+sidebarTitle: "Overview"
+description: "Complete reference for the ag0 REST API. Base URL, versioning, request format, pagination, and rate limits explained."
+---
+
+The ag0 REST API gives you programmatic access to every resource on the platform — from managing integrations and events to configuring webhooks and monitoring deployments. All API requests are made over HTTPS to `https://api.ag0.io/v1`, and all responses are returned as JSON.
+
+## Base URL
+
+Every endpoint in this reference is relative to the following base URL:
+
+```
+https://api.ag0.io/v1
+```
+
+For example, to list your resources you would call `GET https://api.ag0.io/v1/resources`.
+
+## Versioning
+
+The current API version is **`v1`**, which is reflected in the base URL path. ag0 follows a conservative versioning policy:
+
+- **Non-breaking changes** (new optional fields, new endpoints, new enum values) are added to the current version without notice.
+- **Breaking changes** (removed fields, changed field types, behavioral changes) are introduced only in a new version (e.g. `v2`).
+- When a new version is released, the previous version receives a **6-month deprecation window** along with a step-by-step migration guide before it is retired.
+
+You can pin your integration to `v1` with confidence that it will not break without advance notice.
+
+## Request Format
+
+All request bodies must be encoded as JSON with the `Content-Type: application/json` header. The API always expects and returns **UTF-8** encoded strings.
+
+```http
+POST /v1/resources HTTP/1.1
+Host: api.ag0.io
+Authorization: Bearer ag0_sk_abc123xyz
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "my-resource",
+  "type": "connector"
+}
+```
+
+Key headers to include on every request:
+
+| Header | Value | Required |
+|---|---|---|
+| `Authorization` | `Bearer <your-api-key>` | Yes |
+| `Content-Type` | `application/json` | Yes (for POST/PATCH) |
+| `Accept` | `application/json` | Recommended |
+| `Idempotency-Key` | `<uuid-v4>` | Recommended for POST/PATCH |
+
+## Authentication
+
+All API requests require a valid API key passed as a Bearer token in the `Authorization` header. See the [Authentication guide](/api/authentication) for key formats, scopes, and error handling.
+
+## Pagination
+
+List endpoints use **cursor-based pagination**. This approach is stable even as records are created or deleted between requests — you will never miss an item or see a duplicate.
+
+### Query parameters
+
+| Parameter | Type | Default | Max | Description |
+|---|---|---|---|---|
+| `limit` | integer | `20` | `100` | Number of items to return per page |
+| `cursor` | string | — | — | Opaque cursor from the previous response's `next_cursor` field |
+
+### Response envelope
+
+Every paginated list response wraps the result array in a consistent envelope:
+
+```json
+{
+  "data": [
+    {
+      "id": "res_01hx4k2m9nqrst8vwxy3z",
+      "name": "my-connector",
+      "type": "connector",
+      "created_at": "2024-03-15T10:22:00Z"
+    },
+    {
+      "id": "res_01hx4k3p7mqrst9vwxy4a",
+      "name": "secondary-connector",
+      "type": "connector",
+      "created_at": "2024-03-14T08:11:00Z"
+    }
+  ],
+  "has_more": true,
+  "next_cursor": "cur_01hx4kbz2nqrst8vwxy9m",
+  "total_count": 84
+}
+```
+
+To fetch the next page, pass the `next_cursor` value as the `cursor` query parameter in your next request. When `has_more` is `false`, you have reached the end of the list.
+
+## Rate Limits
+
+By default, the ag0 API allows **1,000 requests per minute** per API key. Every response includes the following headers so you can track your usage:
+
+| Header | Description |
+|---|---|
+| `X-RateLimit-Limit` | Maximum requests allowed per minute for your key |
+| `X-RateLimit-Remaining` | Requests remaining in the current window |
+| `X-RateLimit-Reset` | Unix timestamp (UTC) when the current window resets |
+
+```http
+HTTP/1.1 200 OK
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 947
+X-RateLimit-Reset: 1710499260
+```
+
+When you exceed your limit, the API returns `429 Too Many Requests` along with a `Retry-After` header indicating how many seconds to wait before retrying. See the [Errors reference](/api/errors) for details.
+
+If you need a higher rate limit for production workloads, contact [support@ag0.io](mailto:support@ag0.io).
+
+## Idempotency
+
+You can safely retry `POST` and `PATCH` requests without risk of creating duplicate records by including an `Idempotency-Key` header set to a unique UUID v4:
+
+```http
+POST /v1/resources HTTP/1.1
+Host: api.ag0.io
+Authorization: Bearer ag0_sk_abc123xyz
+Content-Type: application/json
+Idempotency-Key: f47ac10b-58cc-4372-a567-0e02b2c3d479
+```
+
+ag0 stores the result of the first request for that key for **24 hours**. If you repeat the exact same request with the same key, you receive the cached response without the operation being executed again. If you send the same key with a *different* payload, the API returns `409 Conflict`.
+
+<Note>
+  Idempotency keys are scoped to your API key — two different API keys can use the same idempotency key string without conflict.
+</Note>
+
+## SDKs
+
+In addition to calling the API directly, ag0 provides official client SDKs that handle authentication, retries, and pagination automatically. See the [First Integration guide](/guides/first-integration) to get started with the SDK for your language.
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Learn how to create API keys, understand key scopes, and handle authentication errors.
+  </Card>
+  <Card title="Errors" icon="circle-exclamation" href="/api/errors">
+    Full reference for HTTP status codes, machine-readable error codes, and retry strategies.
+  </Card>
+  <Card title="Resources Endpoint" icon="database" href="/api/endpoints/resources">
+    Create, read, update, and delete resources via the REST API.
+  </Card>
+  <Card title="Events Endpoint" icon="bolt" href="/api/endpoints/events">
+    Query, filter, and subscribe to events emitted by your integrations.
+  </Card>
+</CardGroup>

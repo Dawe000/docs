@@ -1,47 +1,65 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with ag0 in Minutes"
+sidebarTitle: "Quickstart"
+description: "Learn how to make your first ag0 API call in under 5 minutes. Create an account, get your API key, and retrieve your first resource."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This page walks you through everything you need to make your first successful request to the ag0 API. By the end, you'll have an account, a working API key, and a live API response — all in under five minutes.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Create an account">
+    Go to the ag0 dashboard at [https://app.ag0.io](https://app.ag0.io) and sign up for a free account. You can register with your email address or authenticate through GitHub or Google. Once you confirm your email, you'll land in the main dashboard.
+  </Step>
 
-    ```bash
-    npm install your-package
+  <Step title="Get your API key">
+    From the dashboard, navigate to **Settings → API Keys**. Click **New Key**, give it a descriptive name (for example, `my-first-key`), and click **Create**. Copy the key immediately — ag0 displays it only once at creation time.
+
+    Your key will look like this:
+
+    ```
+    ag0_sk_abc123xyzDEF456uvwGHI789jkl
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Make your first API call">
+    Use the key you just copied to call the resources endpoint. Replace `YOUR_API_KEY` with your actual key:
 
     ```bash
-    your-cli init
+    curl -X GET https://api.ag0.io/v1/resources \
+      -H "Authorization: Bearer YOUR_API_KEY" \
+      -H "Content-Type: application/json"
     ```
+
+    A successful response looks like this:
+
+    ```json
+    {
+      "object": "list",
+      "data": [
+        {
+          "id": "res_01hx29kqz4fn8vt3mdcbr7ewys",
+          "name": "default-workspace",
+          "type": "workspace",
+          "created_at": "2024-11-01T10:22:00Z",
+          "status": "active"
+        }
+      ],
+      "has_more": false,
+      "total_count": 1
+    }
+    ```
+
+    A `200 OK` with a `data` array means everything is working correctly.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
-    ```
+  <Step title="Explore further">
+    Now that your first call is working, keep building:
+
+    - Read the [Concepts Overview](/concepts/overview) to understand how ag0 resources, workspaces, and integrations fit together.
+    - Follow the [First Integration guide](/guides/first-integration) to connect an external service and trigger your first automated workflow.
   </Step>
 </Steps>
 
 <Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+  Running into issues? Reach out to the ag0 support team at **support@ag0.io** or open a ticket directly from the dashboard. We typically respond within one business day.
 </Tip>

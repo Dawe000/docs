@@ -1,0 +1,313 @@
+---
+title: "Receive Real-Time Events with ag0 Webhooks"
+sidebarTitle: "Webhooks"
+description: "Set up ag0 webhooks to receive real-time HTTP notifications when resources change. Includes signature verification and retry handling."
+---
+
+Webhooks let ag0 push event notifications directly to your application the moment something changes — no polling required. Instead of periodically calling the API to check for updates, you register an HTTPS endpoint and ag0 sends an HTTP `POST` request to it whenever a subscribed event occurs. This makes webhooks ideal for workflows that need to react immediately: triggering downstream jobs, syncing data to a database, sending notifications, or updating a UI in real time.
+
+---
+
+## How webhooks work
+
+When an event occurs in ag0 (for example, a resource is created or deleted), ag0 constructs a JSON payload describing the event and sends it as an HTTP `POST` request to every webhook endpoint subscribed to that event type.
+
+- **Format:** JSON body with `Content-Type: application/json`.
+- **Security:** Each request is signed with HMAC-SHA256 so you can verify it genuinely came from ag0.
+- **Delivery guarantee:** ag0 retries failed deliveries up to 3 times with exponential backoff.
+- **Timeout:** Your endpoint must respond within 30 seconds.
+
+---
+
+## Registering a webhook
+
+Send a `POST` request to `/v1/webhooks` with the HTTPS `url` you want ag0 to call and an array of `events` you want to subscribe to.
+
+```bash curl
+curl --request POST \
+  --url https://api.ag0.dev/v1/webhooks \
+  --header "Authorization: Bearer ag0_sk_abc123" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "url": "https://your-app.example.com/webhooks/ag0",
+    "events": [
+      "resource.created",
+      "resource.updated",
+      "resource.deleted"
+    ]
+  }'
+```
+
+```json Response
+{
+  "id": "wh_def456",
+  "url": "https://your-app.example.com/webhooks/ag0",
+  "events": [
+    "resource.created",
+    "resource.updated",
+    "resource.deleted"
+  ],
+  "secret": "whsec_xyz789",
+  "created_at": "2024-06-01T12:01:00Z"
+}
+```
+
+Save the `secret` from the response in a secure secrets store. You'll use it to verify the signature on every incoming request.
+
+### Available event types
+
+| Event type | Triggered when |
+|---|---|
+| `resource.created` | A new resource is successfully created. |
+| `resource.updated` | An existing resource is modified via `PATCH`. |
+| `resource.deleted` | A resource is permanently deleted via `DELETE`. |
+
+You can subscribe to any combination of these events per webhook endpoint. To listen to all events, include all three in the `events` array.
+
+---
+
+## Webhook payload structure
+
+Every webhook request has the same top-level structure regardless of event type.
+
+```json Webhook payload
+{
+  "id": "evt_ghi789",
+  "type": "resource.created",
+  "resource_id": "res_abc123",
+  "data": {
+    "id": "res_abc123",
+    "name": "my-first-resource",
+    "metadata": {
+      "environment": "production",
+      "owner": "alice"
+    },
+    "created_at": "2024-06-01T12:00:00Z",
+    "updated_at": "2024-06-01T12:00:00Z"
+  },
+  "created_at": "2024-06-01T12:00:01Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Unique identifier for this event. Use this to deduplicate retried deliveries. |
+| `type` | string | Event type — one of `resource.created`, `resource.updated`, `resource.deleted`. |
+| `resource_id` | string | The ID of the resource that triggered the event. |
+| `data` | object | Full snapshot of the resource at the time of the event. |
+| `created_at` | string | ISO 8601 timestamp when the event was generated. |
+
+---
+
+## Verifying webhook signatures
+
+ag0 signs every webhook request so you can confirm it came from ag0 and hasn't been tampered with. The signature is computed as an HMAC-SHA256 digest of the raw request body using your webhook secret.
+
+Two headers are included on every request:
+
+| Header | Description |
+|---|---|
+| `X-ag0-Signature` | Hex-encoded HMAC-SHA256 signature of the raw request body. |
+| `X-ag0-Timestamp` | Unix timestamp (UTC) when ag0 sent the request. Use this to reject replayed requests older than a few minutes. |
+
+**Always verify the signature before processing a payload.** Reject any request that fails verification or carries a timestamp older than 5 minutes.
+
+<CodeGroup>
+
+```python Python
+import hashlib
+import hmac
+import time
+from flask import Flask, request, abort
+
+app = Flask(__name__)
+WEBHOOK_SECRET = "whsec_xyz789"  # load from environment in production
+
+
+def verify_signature(payload_body: bytes, secret: str, signature: str, timestamp: str) -> bool:
+    # Reject stale requests (older than 5 minutes)
+    if abs(time.time() - int(timestamp)) > 300:
+        return False
+
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        payload_body,
+        hashlib.sha256,
+    ).hexdigest()
+
+    return hmac.compare_digest(expected, signature)
+
+
+@app.route("/webhooks/ag0", methods=["POST"])
+def handle_webhook():
+    signature = request.headers.get("X-ag0-Signature", "")
+    timestamp = request.headers.get("X-ag0-Timestamp", "")
+
+    if not verify_signature(request.get_data(), WEBHOOK_SECRET, signature, timestamp):
+        abort(403)
+
+    event = request.get_json()
+    print(f"Received event: {event['type']} for resource {event['resource_id']}")
+    return "", 200
+```
+
+```javascript Node.js
+const crypto = require("crypto");
+const express = require("express");
+
+const app = express();
+const WEBHOOK_SECRET = "whsec_xyz789"; // load from environment in production
+
+// Use raw body parser so we can verify the signature
+app.use("/webhooks/ag0", express.raw({ type: "application/json" }));
+
+function verifySignature(rawBody, secret, signature, timestamp) {
+  // Reject stale requests (older than 5 minutes)
+  if (Math.abs(Date.now() / 1000 - parseInt(timestamp, 10)) > 300) {
+    return false;
+  }
+
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(rawBody)
+    .digest("hex");
+
+  return crypto.timingSafeEqual(
+    Buffer.from(expected, "hex"),
+    Buffer.from(signature, "hex")
+  );
+}
+
+app.post("/webhooks/ag0", (req, res) => {
+  const signature = req.headers["x-ag0-signature"] ?? "";
+  const timestamp = req.headers["x-ag0-timestamp"] ?? "";
+
+  if (!verifySignature(req.body, WEBHOOK_SECRET, signature, timestamp)) {
+    return res.status(403).send("Invalid signature");
+  }
+
+  const event = JSON.parse(req.body.toString());
+  console.log(`Received event: ${event.type} for resource ${event.resource_id}`);
+  res.sendStatus(200);
+});
+
+app.listen(3000, () => console.log("Listening on port 3000"));
+```
+
+</CodeGroup>
+
+---
+
+## Responding to webhooks
+
+Your endpoint must return a `2xx` HTTP status code within **30 seconds** of receiving the request. ag0 treats any non-`2xx` response — or no response at all — as a delivery failure and schedules a retry.
+
+If your handler needs to do time-consuming work (database writes, calling third-party APIs, sending emails), acknowledge the request immediately and process the event asynchronously in a background job.
+
+<CodeGroup>
+
+```javascript Express.js
+const express = require("express");
+const app = express();
+
+app.use(express.json());
+
+app.post("/webhooks/ag0", (req, res) => {
+  // Acknowledge immediately
+  res.sendStatus(200);
+
+  // Process asynchronously
+  const event = req.body;
+  setImmediate(() => processEvent(event));
+});
+
+async function processEvent(event) {
+  switch (event.type) {
+    case "resource.created":
+      // handle creation
+      break;
+    case "resource.updated":
+      // handle update
+      break;
+    case "resource.deleted":
+      // handle deletion
+      break;
+    default:
+      console.warn(`Unhandled event type: ${event.type}`);
+  }
+}
+
+app.listen(3000);
+```
+
+```python Flask
+from flask import Flask, request
+import threading
+
+app = Flask(__name__)
+
+
+def process_event(event: dict) -> None:
+    event_type = event.get("type")
+    if event_type == "resource.created":
+        pass  # handle creation
+    elif event_type == "resource.updated":
+        pass  # handle update
+    elif event_type == "resource.deleted":
+        pass  # handle deletion
+    else:
+        print(f"Unhandled event type: {event_type}")
+
+
+@app.route("/webhooks/ag0", methods=["POST"])
+def handle_webhook():
+    event = request.get_json()
+
+    # Acknowledge immediately, then process in background
+    thread = threading.Thread(target=process_event, args=(event,))
+    thread.start()
+
+    return "", 200
+```
+
+</CodeGroup>
+
+---
+
+## Retries and failures
+
+If your endpoint returns a non-`2xx` status code or times out, ag0 retries the delivery using exponential backoff:
+
+| Attempt | Delay after previous failure |
+|---|---|
+| 1st retry | 5 seconds |
+| 2nd retry | 25 seconds |
+| 3rd retry | 125 seconds |
+
+After three retries, ag0 marks the event as **undelivered**. You can view all delivery attempts — including the request payload, your server's HTTP response code, and response body — in the **Event Log** section of the ag0 dashboard. From there you can manually replay any event.
+
+To avoid processing the same event twice during retries, use the event `id` field as an idempotency key and record processed event IDs in your database before acting on them.
+
+---
+
+## Testing webhooks locally
+
+Your local development server is not publicly reachable, so ag0 can't deliver webhooks to `localhost` directly. Use a tunneling tool to expose a local port over HTTPS:
+
+**Using ngrok:**
+
+```bash Shell
+# Install ngrok from https://ngrok.com, then:
+ngrok http 3000
+```
+
+ngrok prints a public HTTPS URL like `https://a1b2c3d4.ngrok-free.app`. Register this URL as your webhook endpoint, then trigger events via the API or the ag0 dashboard. Incoming requests appear in both your local application logs and the ngrok web inspector at `http://localhost:4040`.
+
+Other options include [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) and [localtunnel](https://github.com/localtunnel/localtunnel). Pick whichever fits best into your local development workflow.
+
+<Tip>
+  The ag0 dashboard's **Event Log** lets you replay any past event to your
+  registered endpoint with a single click — no need to manually reproduce the
+  exact API call that triggered it. Use this to iterate on your handler logic
+  without waiting for real activity.
+</Tip>

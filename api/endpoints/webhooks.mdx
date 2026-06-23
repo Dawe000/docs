@@ -1,0 +1,367 @@
+---
+title: "Webhooks API — Register and Manage ag0 Webhooks"
+sidebarTitle: "Webhooks"
+description: "Register webhook endpoints to receive real-time ag0 event notifications. Manage subscriptions, view delivery logs, and replay failed events."
+---
+
+Use the Webhooks API to register and manage your webhook endpoints programmatically. When events occur in ag0 — such as a resource being created, updated, or deleted — ag0 sends an HTTP `POST` request to each matching registered endpoint, delivering the event payload in real time. This lets you build reactive integrations without polling the Events API.
+
+---
+
+## GET /v1/webhooks
+
+List all webhook endpoints registered in your account.
+
+### Query parameters
+
+<ParamField query="limit" type="integer" default={20}>
+  The maximum number of webhooks to return per page. Accepts values between `1` and `100`.
+</ParamField>
+
+<ParamField query="cursor" type="string">
+  A pagination cursor returned in a previous response as `next_cursor`. Pass this value to retrieve the next page of results.
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/webhooks \
+  -H "Authorization: Bearer ag0_sk_abc123"
+```
+
+### Example response
+
+```json
+{
+  "data": [
+    {
+      "id": "wh_def456",
+      "url": "https://example.com/webhooks/ag0",
+      "events": ["resource.created", "resource.updated"],
+      "description": "Production event listener",
+      "status": "active",
+      "created_at": "2024-10-01T12:00:00Z"
+    },
+    {
+      "id": "wh_ghi789",
+      "url": "https://example.com/webhooks/ag0-staging",
+      "events": ["resource.deleted"],
+      "description": "Staging cleanup handler",
+      "status": "inactive",
+      "created_at": "2024-10-05T09:30:00Z"
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null
+}
+```
+
+---
+
+## POST /v1/webhooks
+
+Register a new webhook endpoint. You must supply a valid HTTPS `url` and at least one event type to subscribe to.
+
+<Warning>
+  The `secret` field is **only returned in the response to this creation request**. Store it immediately and securely — ag0 will never show it again. You use this secret to verify the `ag0-signature` header on incoming webhook deliveries.
+</Warning>
+
+### Request body
+
+<ParamField body="url" type="string" required>
+  The HTTPS URL of the endpoint that will receive webhook deliveries. HTTP URLs are not accepted.
+</ParamField>
+
+<ParamField body="events" type="array" required>
+  An array of event type strings the webhook should subscribe to. Accepted values:
+  - `resource.created`
+  - `resource.updated`
+  - `resource.deleted`
+
+  Pass `["*"]` to subscribe to all current and future event types.
+</ParamField>
+
+<ParamField body="description" type="string">
+  An optional human-readable description to help you identify the webhook's purpose.
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/webhooks \
+  -X POST \
+  -H "Authorization: Bearer ag0_sk_abc123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/webhooks/ag0",
+    "events": ["resource.created", "resource.updated"],
+    "description": "Production event listener"
+  }'
+```
+
+### Example response
+
+```json
+{
+  "id": "wh_def456",
+  "url": "https://example.com/webhooks/ag0",
+  "events": ["resource.created", "resource.updated"],
+  "description": "Production event listener",
+  "secret": "whsec_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+  "status": "active",
+  "created_at": "2024-10-01T12:00:00Z"
+}
+```
+
+### Response fields
+
+<ResponseField name="id" type="string">
+  The unique identifier for the webhook endpoint (e.g. `wh_def456`).
+</ResponseField>
+
+<ResponseField name="url" type="string">
+  The HTTPS URL registered to receive event deliveries.
+</ResponseField>
+
+<ResponseField name="events" type="array">
+  The list of event types this webhook is subscribed to.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  The optional description provided at creation.
+</ResponseField>
+
+<ResponseField name="secret" type="string">
+  The signing secret used to verify incoming webhook payloads. **Only present in this creation response.**
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  The current status of the webhook. Either `active` or `inactive`.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  The ISO 8601 timestamp when the webhook was registered.
+</ResponseField>
+
+---
+
+## GET /v1/webhooks/\{id\}
+
+Retrieve a single webhook endpoint by its identifier. The `secret` field is not returned by this endpoint.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the webhook to retrieve (e.g. `wh_def456`).
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/webhooks/wh_def456 \
+  -H "Authorization: Bearer ag0_sk_abc123"
+```
+
+### Example response
+
+```json
+{
+  "id": "wh_def456",
+  "url": "https://example.com/webhooks/ag0",
+  "events": ["resource.created", "resource.updated"],
+  "description": "Production event listener",
+  "status": "active",
+  "created_at": "2024-10-01T12:00:00Z"
+}
+```
+
+---
+
+## PATCH /v1/webhooks/\{id\}
+
+Update an existing webhook endpoint. Only the fields you include in the request body are modified.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the webhook to update (e.g. `wh_def456`).
+</ParamField>
+
+### Request body
+
+<ParamField body="url" type="string">
+  A new HTTPS URL for the webhook endpoint. Must be a valid HTTPS URL.
+</ParamField>
+
+<ParamField body="events" type="array">
+  Replace the current event subscriptions with this new list of event type strings.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Update the human-readable description for this webhook.
+</ParamField>
+
+<ParamField body="status" type="string">
+  Change the webhook's status. Accepted values: `active`, `inactive`. Setting a webhook to `inactive` suspends all deliveries without deleting the endpoint.
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/webhooks/wh_def456 \
+  -X PATCH \
+  -H "Authorization: Bearer ag0_sk_abc123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "events": ["resource.created", "resource.updated", "resource.deleted"],
+    "description": "Production event listener — all events",
+    "status": "active"
+  }'
+```
+
+### Example response
+
+```json
+{
+  "id": "wh_def456",
+  "url": "https://example.com/webhooks/ag0",
+  "events": ["resource.created", "resource.updated", "resource.deleted"],
+  "description": "Production event listener — all events",
+  "status": "active",
+  "created_at": "2024-10-01T12:00:00Z"
+}
+```
+
+---
+
+## DELETE /v1/webhooks/\{id\}
+
+Permanently delete a webhook endpoint. ag0 immediately stops sending deliveries to this endpoint. Any delivery records associated with the webhook are retained for their normal retention period.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the webhook to delete (e.g. `wh_def456`).
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/webhooks/wh_def456 \
+  -X DELETE \
+  -H "Authorization: Bearer ag0_sk_abc123"
+```
+
+### Example response
+
+```json
+{
+  "deleted": true,
+  "id": "wh_def456"
+}
+```
+
+---
+
+## GET /v1/webhooks/\{id\}/deliveries
+
+List the delivery attempts made for a specific webhook endpoint. Use this to audit delivery history or identify failed attempts that need investigation.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the webhook whose deliveries you want to list (e.g. `wh_def456`).
+</ParamField>
+
+### Query parameters
+
+<ParamField query="limit" type="integer" default={20}>
+  The maximum number of delivery records to return per page. Accepts values between `1` and `100`.
+</ParamField>
+
+<ParamField query="cursor" type="string">
+  A pagination cursor returned in a previous response as `next_cursor`. Pass this value to retrieve the next page of results.
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter deliveries by their outcome. Accepted values:
+  - `success` — the endpoint returned an HTTP `2xx` response
+  - `failed` — the endpoint returned a non-`2xx` response or timed out
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/webhooks/wh_def456/deliveries \
+  -H "Authorization: Bearer ag0_sk_abc123" \
+  -G \
+  --data-urlencode "limit=5" \
+  --data-urlencode "status=failed"
+```
+
+### Example response
+
+```json
+{
+  "data": [
+    {
+      "id": "del_pqr111",
+      "event_id": "evt_xyz789",
+      "status": "failed",
+      "response_code": 503,
+      "delivered_at": "2024-12-01T09:15:50Z",
+      "next_retry_at": "2024-12-01T09:25:50Z"
+    },
+    {
+      "id": "del_stu222",
+      "event_id": "evt_uvw456",
+      "status": "failed",
+      "response_code": 500,
+      "delivered_at": "2024-11-15T08:32:20Z",
+      "next_retry_at": null
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null
+}
+```
+
+### Response fields
+
+<ResponseField name="data" type="array">
+  An array of delivery attempt objects.
+
+  <Expandable title="Delivery object fields">
+    <ResponseField name="id" type="string">
+      The unique identifier for this delivery attempt (e.g. `del_pqr111`).
+    </ResponseField>
+
+    <ResponseField name="event_id" type="string">
+      The identifier of the event that triggered this delivery attempt.
+    </ResponseField>
+
+    <ResponseField name="status" type="string">
+      The outcome of the delivery attempt. Either `success` or `failed`.
+    </ResponseField>
+
+    <ResponseField name="response_code" type="integer">
+      The HTTP response code returned by your endpoint. `null` if the request timed out before a response was received.
+    </ResponseField>
+
+    <ResponseField name="delivered_at" type="string">
+      The ISO 8601 timestamp of when this delivery attempt was made.
+    </ResponseField>
+
+    <ResponseField name="next_retry_at" type="string | null">
+      The ISO 8601 timestamp of the next scheduled retry for a failed delivery. `null` if the delivery succeeded or if all retries have been exhausted.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="has_more" type="boolean">
+  `true` if there are additional pages of delivery records available.
+</ResponseField>
+
+<ResponseField name="next_cursor" type="string | null">
+  A cursor you can pass to the next request to retrieve the following page. `null` when you have reached the last page.
+</ResponseField>

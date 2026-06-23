@@ -1,0 +1,241 @@
+---
+title: "Build Your First ag0 Integration End to End"
+sidebarTitle: "First Integration"
+description: "Follow this step-by-step guide to connect ag0 to your application — create resources, listen for events, and process webhook notifications."
+---
+
+This guide walks you through a complete ag0 integration from scratch. You'll create your first resource, query it via the REST API, register a webhook endpoint to receive real-time event notifications, and learn how to update and clean up resources. By the end, you'll have a working end-to-end flow you can adapt for your own application.
+
+<Note>
+  **Before you begin**, make sure you have an [API key](/authentication) and a
+  publicly reachable HTTPS URL for your webhook endpoint. For local development,
+  use a tunneling tool like [ngrok](https://ngrok.com) to expose `localhost` over
+  HTTPS.
+</Note>
+
+<Steps>
+
+  <Step title="Create a resource">
+    Send a `POST` request to `/v1/resources` with a `name` and an optional
+    `metadata` object. The `metadata` field accepts any key-value pairs you want
+    to attach to the resource.
+
+    <CodeGroup>
+
+    ```bash curl
+    curl --request POST \
+      --url https://api.ag0.dev/v1/resources \
+      --header "Authorization: Bearer ag0_sk_abc123" \
+      --header "Content-Type: application/json" \
+      --data '{
+        "name": "my-first-resource",
+        "metadata": {
+          "environment": "production",
+          "owner": "alice"
+        }
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        "https://api.ag0.dev/v1/resources",
+        headers={
+            "Authorization": "Bearer ag0_sk_abc123",
+            "Content-Type": "application/json",
+        },
+        json={
+            "name": "my-first-resource",
+            "metadata": {
+                "environment": "production",
+                "owner": "alice",
+            },
+        },
+    )
+
+    resource = response.json()
+    print(resource["id"])  # res_abc123
+    ```
+
+    </CodeGroup>
+
+    A successful request returns `201 Created` with the new resource object:
+
+    ```json Response
+    {
+      "id": "res_abc123",
+      "name": "my-first-resource",
+      "metadata": {
+        "environment": "production",
+        "owner": "alice"
+      },
+      "created_at": "2024-06-01T12:00:00Z",
+      "updated_at": "2024-06-01T12:00:00Z"
+    }
+    ```
+
+    Save the `id` — you'll use it in the update and delete steps below.
+  </Step>
+
+  <Step title="List your resources">
+    Retrieve all resources in your account by sending a `GET` request to
+    `/v1/resources`. The response is paginated; use the `next_cursor` field to
+    fetch subsequent pages.
+
+    ```bash curl
+    curl --request GET \
+      --url "https://api.ag0.dev/v1/resources?limit=20" \
+      --header "Authorization: Bearer ag0_sk_abc123"
+    ```
+
+    ```json Response
+    {
+      "data": [
+        {
+          "id": "res_abc123",
+          "name": "my-first-resource",
+          "metadata": {
+            "environment": "production",
+            "owner": "alice"
+          },
+          "created_at": "2024-06-01T12:00:00Z",
+          "updated_at": "2024-06-01T12:00:00Z"
+        }
+      ],
+      "has_more": false,
+      "next_cursor": null
+    }
+    ```
+
+    When `has_more` is `true`, pass `cursor=<next_cursor>` as a query parameter
+    to retrieve the next page of results.
+  </Step>
+
+  <Step title="Register a webhook">
+    Tell ag0 where to deliver event notifications by registering a webhook
+    endpoint. Send a `POST` request to `/v1/webhooks` with your HTTPS `url` and
+    the list of `events` you want to subscribe to.
+
+    ```bash curl
+    curl --request POST \
+      --url https://api.ag0.dev/v1/webhooks \
+      --header "Authorization: Bearer ag0_sk_abc123" \
+      --header "Content-Type: application/json" \
+      --data '{
+        "url": "https://your-app.example.com/webhooks/ag0",
+        "events": [
+          "resource.created",
+          "resource.updated",
+          "resource.deleted"
+        ]
+      }'
+    ```
+
+    ```json Response
+    {
+      "id": "wh_def456",
+      "url": "https://your-app.example.com/webhooks/ag0",
+      "events": [
+        "resource.created",
+        "resource.updated",
+        "resource.deleted"
+      ],
+      "secret": "whsec_xyz789",
+      "created_at": "2024-06-01T12:01:00Z"
+    }
+    ```
+
+    Store the `secret` securely — you'll use it to verify incoming webhook
+    signatures in the next step.
+  </Step>
+
+  <Step title="Receive an event">
+    When a subscribed event occurs, ag0 sends an HTTP `POST` request to your
+    registered URL. The request body is a JSON payload describing the event.
+
+    **Sample payload delivered to your endpoint:**
+
+    ```json Webhook payload
+    {
+      "id": "evt_ghi789",
+      "type": "resource.created",
+      "resource_id": "res_abc123",
+      "data": {
+        "id": "res_abc123",
+        "name": "my-first-resource",
+        "metadata": {
+          "environment": "production",
+          "owner": "alice"
+        },
+        "created_at": "2024-06-01T12:00:00Z",
+        "updated_at": "2024-06-01T12:00:00Z"
+      },
+      "created_at": "2024-06-01T12:00:01Z"
+    }
+    ```
+
+    **Verify the `X-ag0-Signature` header**
+
+    Every request includes an `X-ag0-Signature` header containing an
+    HMAC-SHA256 signature computed from the raw request body and your webhook
+    secret. Always verify this signature before processing the payload.
+
+    ```python Python
+    import hashlib
+    import hmac
+
+    def verify_signature(payload_body: bytes, secret: str, signature_header: str) -> bool:
+        expected = hmac.new(
+            secret.encode("utf-8"),
+            payload_body,
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, signature_header)
+    ```
+
+    Reject any request for which the signature does not match.
+  </Step>
+
+  <Step title="Update and delete a resource">
+    **Update a resource** by sending a `PATCH` request to
+    `/v1/resources/{id}`. Only include the fields you want to change.
+
+    ```bash curl (PATCH)
+    curl --request PATCH \
+      --url https://api.ag0.dev/v1/resources/res_abc123 \
+      --header "Authorization: Bearer ag0_sk_abc123" \
+      --header "Content-Type: application/json" \
+      --data '{
+        "metadata": {
+          "environment": "staging",
+          "owner": "alice",
+          "reviewed": "true"
+        }
+      }'
+    ```
+
+    ag0 returns the full updated resource object with a fresh `updated_at`
+    timestamp.
+
+    **Delete a resource** by sending a `DELETE` request to the same path. A
+    successful deletion returns `204 No Content`.
+
+    ```bash curl (DELETE)
+    curl --request DELETE \
+      --url https://api.ag0.dev/v1/resources/res_abc123 \
+      --header "Authorization: Bearer ag0_sk_abc123"
+    ```
+
+    After deletion, ag0 emits a `resource.deleted` event to all webhooks
+    subscribed to that event type.
+  </Step>
+
+</Steps>
+
+<Tip>
+  Open the **Event Log** in the ag0 dashboard to inspect every webhook delivery
+  attempt, view the raw payload, see the HTTP response your server returned, and
+  manually replay any event. This is the fastest way to debug your integration
+  without waiting for real activity to occur.
+</Tip>

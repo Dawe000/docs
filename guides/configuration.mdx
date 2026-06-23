@@ -1,0 +1,214 @@
+---
+title: "Configure ag0 for Your Environment"
+sidebarTitle: "Configuration"
+description: "Learn how to configure ag0 settings, manage API keys, customize resource behavior, and control rate limits for your environment."
+---
+
+Before you start making API calls, take a few minutes to configure ag0 correctly for your environment. Proper configuration — setting environment variables, scoping API keys, tuning rate-limit handling, and locking down your webhook endpoint — will save you hours of debugging as your integration grows.
+
+---
+
+## Environment setup
+
+Set the following environment variables so your application can authenticate with ag0 without hard-coding credentials in source files.
+
+| Variable | Description |
+|---|---|
+| `AG0_API_KEY` | Your ag0 API key (see [API key management](#api-key-management) below). |
+| `AG0_BASE_URL` | The base URL for the API. Defaults to `https://api.ag0.dev`. Override this to point at a staging or sandbox environment. |
+
+**Shell export (one session):**
+
+```bash Shell
+export AG0_API_KEY="ag0_sk_abc123"
+export AG0_BASE_URL="https://api.ag0.dev"
+```
+
+**`.env` file (recommended for local development):**
+
+```ini .env
+AG0_API_KEY=ag0_sk_abc123
+AG0_BASE_URL=https://api.ag0.dev
+```
+
+Load this file with a library like [python-dotenv](https://pypi.org/project/python-dotenv/) or [dotenv](https://www.npmjs.com/package/dotenv) in Node.js:
+
+```python Python
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+api_key = os.environ["AG0_API_KEY"]
+base_url = os.environ.get("AG0_BASE_URL", "https://api.ag0.dev")
+```
+
+<Warning>
+  **Never commit your `.env` file to version control.** Add `.env` to your
+  `.gitignore` immediately and use your CI/CD platform's secret management (for
+  example, GitHub Actions secrets or AWS Secrets Manager) to inject credentials
+  in production.
+</Warning>
+
+---
+
+## API key management
+
+ag0 supports scoped API keys that limit what a given key can do. Create the right key for each use case to reduce your blast radius if a key is ever compromised.
+
+### Key scopes
+
+| Scope | Can do |
+|---|---|
+| `read` | `GET` requests only — list and retrieve resources. |
+| `read_write` | All `GET`, `POST`, `PATCH`, and `DELETE` requests. |
+
+Create a new scoped key in the **API Keys** section of the ag0 dashboard, or via the API:
+
+```bash curl
+curl --request POST \
+  --url https://api.ag0.dev/v1/api-keys \
+  --header "Authorization: Bearer ag0_sk_abc123" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "name": "ci-read-only",
+    "scope": "read"
+  }'
+```
+
+### Naming conventions
+
+Use a consistent naming scheme so keys are easy to audit and revoke:
+
+```
+<purpose>-<environment>-<scope>
+```
+
+Examples:
+- `dashboard-production-read_write`
+- `ci-staging-read`
+- `analytics-production-read`
+
+### Rotation schedule
+
+Rotate API keys at least every **90 days**, and immediately whenever a key may have been exposed. ag0 lets you create a replacement key and delete the old one without any downtime — the two keys can coexist until you've updated all consumers.
+
+---
+
+## Configuring resource defaults
+
+Attach consistent metadata to every resource your integration creates by building a shared helper that injects default tags. This makes it easy to filter, audit, and clean up resources later.
+
+```python Python
+import os
+import requests
+
+BASE_URL = os.environ.get("AG0_BASE_URL", "https://api.ag0.dev")
+API_KEY = os.environ["AG0_API_KEY"]
+
+DEFAULT_METADATA = {
+    "managed_by": "my-integration",
+    "environment": os.environ.get("APP_ENV", "development"),
+    "version": "1.0.0",
+}
+
+def create_resource(name: str, extra_metadata: dict | None = None) -> dict:
+    metadata = {**DEFAULT_METADATA, **(extra_metadata or {})}
+    response = requests.post(
+        f"{BASE_URL}/v1/resources",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"name": name, "metadata": metadata},
+    )
+    response.raise_for_status()
+    return response.json()
+```
+
+Any resource created through `create_resource()` automatically carries the `managed_by`, `environment`, and `version` labels, making bulk queries straightforward:
+
+```bash curl
+# List all resources tagged as managed by your integration
+curl "https://api.ag0.dev/v1/resources?metadata[managed_by]=my-integration" \
+  --header "Authorization: Bearer ag0_sk_abc123"
+```
+
+---
+
+## Rate limit configuration
+
+ag0 enforces a default limit of **1,000 requests per minute** per API key. Every response includes three headers you can use to track your usage:
+
+| Header | Description |
+|---|---|
+| `X-RateLimit-Limit` | Maximum requests allowed per minute. |
+| `X-RateLimit-Remaining` | Requests remaining in the current window. |
+| `X-RateLimit-Reset` | Unix timestamp (UTC) when the window resets. |
+
+When you exceed the limit, ag0 returns `429 Too Many Requests`. Implement exponential backoff to handle this gracefully:
+
+```python Python
+import time
+import requests
+from requests.exceptions import HTTPError
+
+def request_with_backoff(method: str, url: str, **kwargs) -> requests.Response:
+    """Make an API request with exponential backoff on rate-limit errors."""
+    max_retries = 5
+    base_delay = 1.0  # seconds
+
+    for attempt in range(max_retries):
+        response = requests.request(method, url, **kwargs)
+
+        if response.status_code == 429:
+            if attempt == max_retries - 1:
+                response.raise_for_status()
+            retry_after = int(response.headers.get("Retry-After", base_delay * (2 ** attempt)))
+            print(f"Rate limited. Retrying in {retry_after}s (attempt {attempt + 1}/{max_retries})")
+            time.sleep(retry_after)
+            continue
+
+        response.raise_for_status()
+        return response
+
+    raise RuntimeError("Exceeded maximum retries")
+```
+
+If your workload regularly approaches the default limit, contact [ag0 support](mailto:support@ag0.dev) to discuss a higher quota tier.
+
+---
+
+## Webhook configuration
+
+Webhooks let ag0 push event notifications to your application in real time. Keep the following constraints in mind when setting up your endpoint.
+
+### Retry policy
+
+If your endpoint does not respond with a `2xx` status within **30 seconds**, ag0 considers the delivery a failure and retries up to **3 times** using exponential backoff:
+
+| Attempt | Delay after previous failure |
+|---|---|
+| 1st retry | 5 seconds |
+| 2nd retry | 25 seconds |
+| 3rd retry | 125 seconds |
+
+After three failed retries, ag0 marks the event as undelivered. You can replay any event manually from the dashboard's Event Log.
+
+### Timeout
+
+Your endpoint must return a `2xx` response within **30 seconds**. If your handler needs to do heavy processing, acknowledge the request immediately and hand off work to a background queue.
+
+### HTTPS requirement
+
+ag0 only delivers webhooks to **HTTPS** endpoints. Plain HTTP URLs are rejected at registration time. Use a trusted TLS certificate (for example, from Let's Encrypt) for your production endpoint.
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Webhooks guide" icon="webhook" href="/guides/webhooks">
+    Set up signature verification, handle retries, and test your webhook
+    endpoint locally.
+  </Card>
+  <Card title="API overview" icon="rectangle-terminal" href="/api/overview">
+    Explore the full ag0 REST API reference — endpoints, parameters, and
+    response schemas.
+  </Card>
+</CardGroup>

@@ -1,23 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
+  "projectType": "general",
+  "projectName": "ag0",
+  "projectDescription": "ag0 is a developer platform providing tools, APIs, and integrations for building and deploying modern applications.",
   "theme": "luma",
-  "name": "ag0",
-  "colors": {
-    "primary": "#848c8e",
-    "light": "#11161e",
-    "dark": "#cfd0d2"
-  },
-  "favicon": "https://media.brand.dev/2b01fe20-c04b-4a1d-a2f9-1d2789c50a7a.jpg",
-  "logo": {
-    "light": "https://media.brand.dev/5ffd6ce4-2434-4b4b-920a-f8cacac8b48b.svg",
-    "dark": "https://media.brand.dev/5ffd6ce4-2434-4b4b-920a-f8cacac8b48b.svg"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/Dawe000/ag0-docs"
-    }
-  },
+  "primaryColor": "#848c8e",
+  "lightColor": "#11161e",
+  "darkColor": "#cfd0d2",
   "navigation": {
     "tabs": [
       {
@@ -79,9 +67,18 @@
       }
     ]
   },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/Dawe000/ag0-docs"
-    }
-  }
+  "keyFeatures": [
+    "REST API for programmatic access",
+    "Webhook support for real-time event notifications",
+    "Authentication via API keys",
+    "Flexible configuration options",
+    "Developer-friendly SDKs and integrations"
+  ],
+  "publicApiSurface": [
+    "GET /v1/resources",
+    "POST /v1/resources",
+    "GET /v1/events",
+    "POST /v1/webhooks",
+    "DELETE /v1/webhooks/{id}"
+  ]
 }

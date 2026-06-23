@@ -1,0 +1,114 @@
+---
+title: "ag0 Key Features and Capabilities"
+sidebarTitle: "Key Features"
+description: "Explore ag0's core features: REST API, real-time webhooks, flexible configuration, and integrations that accelerate your development workflow."
+---
+
+ag0 is designed to get you from zero to production as quickly as possible. Every feature in the platform follows the same principle: keep the API surface predictable, make failures recoverable, and give you the observability you need to build with confidence. Below is a tour of the capabilities you'll use most often.
+
+## REST API
+
+ag0 exposes a fully RESTful HTTP API with support for `GET`, `POST`, `PATCH`, and `DELETE` operations across all resources. Every endpoint returns JSON, follows conventional HTTP status codes, and is versioned under `/v1` so your integrations are protected from breaking changes.
+
+```json
+POST https://api.ag0.io/v1/resources
+Content-Type: application/json
+Authorization: Bearer ag0_live_xxxxxxxxxxxxxxxxxxxx
+
+{
+  "name": "my-resource",
+  "metadata": {
+    "env": "production"
+  }
+}
+```
+
+The API is designed to be browsable — consistent naming, predictable response shapes, and comprehensive error messages make it easy to explore even without a dedicated SDK.
+
+## Real-time Webhooks
+
+Subscribe your server to ag0 events and receive HTTP `POST` payloads the moment a resource changes state. You register a webhook endpoint in the dashboard or via the API, choose the event types you want to receive, and ag0 handles delivery, retries, and signing.
+
+Every webhook payload is signed with a secret you control, so you can verify that requests are genuinely from ag0:
+
+```json
+{
+  "id": "evt_xyz789",
+  "type": "resource.created",
+  "resource_id": "res_abc123",
+  "data": {
+    "id": "res_abc123",
+    "type": "pipeline",
+    "name": "my-resource",
+    "status": "active"
+  },
+  "created_at": "2024-11-01T12:00:00Z"
+}
+```
+
+ag0 retries failed deliveries with exponential backoff — up to five attempts over four hours — and marks the webhook as failed only if all attempts are exhausted.
+
+## API Keys & Scoped Access
+
+Generate API keys directly in the ag0 dashboard and assign them fine-grained permission scopes. Rather than issuing a single all-powerful key, you can create separate keys for different services or environments — for example, a read-only key for your analytics pipeline and a write-enabled key for your deployment service.
+
+<Note>
+  Always store your API keys in environment variables or a secrets manager. Never commit them to source control. If a key is compromised, you can rotate it from the dashboard without downtime.
+</Note>
+
+Keys are prefixed to indicate their environment: `ag0_live_` for production and `ag0_test_` for sandbox. Test-mode keys interact with an isolated environment and never affect live data.
+
+## Idempotent Requests
+
+Safely retry any mutating request by including a unique `Idempotency-Key` header. ag0 stores the result of the original request for 24 hours and returns that same result — without re-executing the operation — if it sees the same key again.
+
+```json
+POST https://api.ag0.io/v1/resources
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+Content-Type: application/json
+Authorization: Bearer ag0_live_xxxxxxxxxxxxxxxxxxxx
+
+{
+  "name": "my-idempotent-resource"
+}
+```
+
+Use a UUID v4 as your idempotency key and generate it once per logical operation. Reuse the same key on every retry attempt for that operation. This pattern is essential for handling network timeouts and transient errors without creating duplicate resources.
+
+## Pagination
+
+All list endpoints in the ag0 API use **cursor-based pagination**. Responses include a `next_cursor` field you pass as a query parameter to fetch the next page of results. This approach is stable and efficient — even if new records are created between requests, your pagination position stays consistent.
+
+```json
+GET https://api.ag0.io/v1/resources?limit=20&cursor=res_abc123
+
+{
+  "data": [ /* array of resource objects */ ],
+  "has_more": true,
+  "next_cursor": "res_xyz789"
+}
+```
+
+The default page size is `20` items; the maximum is `100`. When `has_more` is `false`, you've reached the end of the list.
+
+## Rate Limiting
+
+ag0 enforces per-key rate limits to ensure fair usage and platform stability. The current limits are included in every API response as standard headers:
+
+| Header | Description |
+|---|---|
+| `X-RateLimit-Limit` | The maximum number of requests allowed in the current window |
+| `X-RateLimit-Remaining` | The number of requests remaining in the current window |
+| `X-RateLimit-Reset` | The Unix timestamp at which the current window resets |
+
+When you exceed your rate limit, ag0 returns a `429 Too Many Requests` response. Implement exponential backoff in your retry logic and use the `X-RateLimit-Reset` header to know exactly when you can resume sending requests.
+
+<Note>
+  Higher rate limits are available on upgraded plans. Contact support if your workload consistently approaches the default limits.
+</Note>
+
+---
+
+<Tip>
+  Ready to see these features in action? Follow the [quickstart guide](/guides/first-integration) to make your first API call and receive your first webhook in under five minutes.
+</Tip>

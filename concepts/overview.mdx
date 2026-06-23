@@ -1,0 +1,108 @@
+---
+title: "How ag0 Works: Platform Architecture Overview"
+sidebarTitle: "Overview"
+description: "Understand ag0's core architecture — resources, events, and webhooks — and how they work together to power your integrations."
+---
+
+ag0 is a developer platform built around a simple, consistent model: you manage **resources** through a RESTful API, and ag0 automatically tracks every state change as an **event** and delivers real-time **webhook** notifications to your systems. Whether you're building a lightweight integration or a complex multi-step workflow, every interaction with ag0 follows the same predictable pattern — making it easy to reason about, debug, and extend your applications.
+
+## The ag0 model
+
+ag0 is built on three core primitives that work together across every part of the platform.
+
+### Resources
+
+Resources are the primary entities you create, read, update, and delete through the ag0 API. Every resource has a unique ID, a type, a status, and a flexible `metadata` object you can use to attach your own data. Resources are the source of truth for your integration — when you need to know the current state of something in ag0, you query its resource object.
+
+### Events
+
+Every time a resource changes state — when it's created, updated, or deleted — ag0 records an **event**. Events are immutable, timestamped records of what happened and when. They capture a full snapshot of the resource at the moment of the change, so you always have a complete audit trail without needing to reconstruct state from multiple requests.
+
+### Webhooks
+
+Webhooks are the delivery mechanism for events. You register a webhook endpoint on your server, subscribe it to the event types you care about, and ag0 sends an HTTP `POST` request to your URL whenever a matching event occurs. Webhooks close the loop between your app and ag0 — instead of polling for changes, your system reacts in real time.
+
+### How they fit together
+
+```
+┌─────────────┐     HTTP Request      ┌─────────────┐
+│             │ ───────────────────►  │             │
+│  Your App   │                       │  ag0 API    │
+│             │ ◄───────────────────  │             │
+└─────────────┘     API Response      └──────┬──────┘
+       ▲                                     │
+       │                                     │ Creates / Updates
+       │                              ┌──────▼──────┐
+       │                              │             │
+       │  Webhook POST payload        │  Resources  │
+       │                              │             │
+       │                              └──────┬──────┘
+       │                                     │
+       │                              ┌──────▼──────┐
+       │                              │             │
+       └──────────────────────────────│   Events &  │
+                                      │  Webhooks   │
+                                      │             │
+                                      └─────────────┘
+```
+
+When your app makes a request to the ag0 API, ag0 creates or modifies a resource, records an event for that change, and delivers a webhook notification back to your registered endpoint — all within milliseconds.
+
+## How requests work
+
+The ag0 API is a RESTful HTTP API. All requests use standard HTTP methods — `GET`, `POST`, `PATCH`, and `DELETE` — and all request and response bodies are JSON.
+
+**Base URL**
+
+```
+https://api.ag0.io/v1
+```
+
+Every endpoint is versioned under `/v1`. When ag0 introduces breaking changes, a new version path is released, and your existing integrations on `/v1` continue to work without modification.
+
+**Authentication**
+
+You authenticate by passing your API key in the `Authorization` header as a Bearer token:
+
+```json
+Authorization: Bearer ag0_live_xxxxxxxxxxxxxxxxxxxx
+```
+
+You can create and manage API keys in the ag0 dashboard. Keys can be scoped to specific permissions so you can follow the principle of least privilege in your integrations.
+
+**Request and response format**
+
+All request bodies must be JSON and include a `Content-Type: application/json` header. Responses are always JSON. Successful responses return a `2xx` status code; errors return a structured JSON body with a `code`, `message`, and optional `details` field.
+
+## Idempotency
+
+Network failures happen. To make it safe to retry any mutating request — `POST`, `PATCH`, or `DELETE` — without risking duplicate operations, ag0 supports idempotency keys.
+
+Include a unique `Idempotency-Key` header on your request:
+
+```json
+Idempotency-Key: a8098c1a-f86e-11da-bd1a-00112444be1e
+```
+
+If ag0 receives two requests with the same idempotency key within 24 hours, the second request returns the same response as the first without re-executing the operation. Use a randomly generated UUID as your idempotency key. Store it alongside the action you're retrying so you can reuse the same key on subsequent attempts.
+
+<Tip>
+  Idempotency keys are especially important for webhook delivery handlers and payment-related operations where duplicate side effects would be harmful.
+</Tip>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Key Features" icon="stars" href="/concepts/key-features">
+    Explore ag0's core capabilities, from the REST API to rate limiting and pagination.
+  </Card>
+  <Card title="Data Model" icon="database" href="/concepts/data-model">
+    Understand how resources, events, and metadata are structured.
+  </Card>
+  <Card title="API Overview" icon="code" href="/api/overview">
+    Browse the full API reference with request and response schemas.
+  </Card>
+  <Card title="Your First Integration" icon="rocket" href="/guides/first-integration">
+    Follow a step-by-step guide to make your first ag0 API call.
+  </Card>
+</CardGroup>

@@ -1,0 +1,243 @@
+---
+title: "Resources API — CRUD Endpoints for ag0 Resources"
+sidebarTitle: "Resources"
+description: "Create, retrieve, update, list, and delete ag0 resources via the REST API. Full request and response reference with examples."
+---
+
+The Resources API is the primary way to manage entities in ag0. Every object you create — configurations, deployments, integrations — is represented as a resource. Use these endpoints to programmatically create, inspect, modify, and remove resources from your account.
+
+---
+
+## GET /v1/resources
+
+List all resources in your account. Results are returned in reverse chronological order and support cursor-based pagination.
+
+### Query parameters
+
+<ParamField query="limit" type="integer" default={20}>
+  The maximum number of resources to return per page. Accepts values between `1` and `100`.
+</ParamField>
+
+<ParamField query="cursor" type="string">
+  A pagination cursor returned in a previous response as `next_cursor`. Pass this value to retrieve the next page of results.
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter results by resource status. Accepted values: `active`, `inactive`, `pending`.
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/resources \
+  -H "Authorization: Bearer ag0_sk_abc123" \
+  -G \
+  --data-urlencode "limit=5" \
+  --data-urlencode "status=active"
+```
+
+### Example response
+
+```json
+{
+  "data": [
+    {
+      "id": "res_abc123",
+      "type": "deployment",
+      "name": "production-api",
+      "status": "active",
+      "metadata": {
+        "region": "us-east-1",
+        "version": "2.4.0"
+      },
+      "created_at": "2024-09-01T10:00:00Z",
+      "updated_at": "2024-11-15T08:32:11Z"
+    },
+    {
+      "id": "res_bcd234",
+      "type": "integration",
+      "name": "stripe-connector",
+      "status": "active",
+      "metadata": {},
+      "created_at": "2024-10-12T14:22:00Z",
+      "updated_at": "2024-10-12T14:22:00Z"
+    }
+  ],
+  "has_more": true,
+  "next_cursor": "cur_eyJpZCI6InJlc19iY2QyMzQifQ"
+}
+```
+
+---
+
+## POST /v1/resources
+
+Create a new resource. You must supply a `name`; all other fields are optional at creation time.
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  A human-readable name for the resource. Must be between 1 and 255 characters.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  An arbitrary key-value object you can use to store additional structured information alongside the resource. Keys and values must be strings.
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/resources \
+  -X POST \
+  -H "Authorization: Bearer ag0_sk_abc123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "production-api",
+    "metadata": {
+      "region": "us-east-1",
+      "version": "2.4.0"
+    }
+  }'
+```
+
+### Example response
+
+```json
+{
+  "id": "res_abc123",
+  "type": "deployment",
+  "name": "production-api",
+  "status": "active",
+  "metadata": {
+    "region": "us-east-1",
+    "version": "2.4.0"
+  },
+  "created_at": "2024-09-01T10:00:00Z",
+  "updated_at": "2024-09-01T10:00:00Z"
+}
+```
+
+---
+
+## GET /v1/resources/\{id\}
+
+Retrieve a single resource by its unique identifier.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the resource to retrieve (e.g. `res_abc123`).
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/resources/res_abc123 \
+  -H "Authorization: Bearer ag0_sk_abc123"
+```
+
+### Example response
+
+```json
+{
+  "id": "res_abc123",
+  "type": "deployment",
+  "name": "production-api",
+  "status": "active",
+  "metadata": {
+    "region": "us-east-1",
+    "version": "2.4.0"
+  },
+  "created_at": "2024-09-01T10:00:00Z",
+  "updated_at": "2024-11-15T08:32:11Z"
+}
+```
+
+---
+
+## PATCH /v1/resources/\{id\}
+
+Update one or more fields on an existing resource. Only the fields you include in the request body are modified; omitted fields remain unchanged.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the resource to update (e.g. `res_abc123`).
+</ParamField>
+
+### Request body
+
+<ParamField body="name" type="string">
+  A new human-readable name for the resource.
+</ParamField>
+
+<ParamField body="status" type="string">
+  Update the resource status. Accepted values: `active`, `inactive`.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Replace the resource's metadata with the supplied key-value object. This is a full replacement — keys not included in the new object will be removed.
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/resources/res_abc123 \
+  -X PATCH \
+  -H "Authorization: Bearer ag0_sk_abc123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "production-api-v2",
+    "status": "active",
+    "metadata": {
+      "region": "us-east-1",
+      "version": "3.0.0"
+    }
+  }'
+```
+
+### Example response
+
+```json
+{
+  "id": "res_abc123",
+  "type": "deployment",
+  "name": "production-api-v2",
+  "status": "active",
+  "metadata": {
+    "region": "us-east-1",
+    "version": "3.0.0"
+  },
+  "created_at": "2024-09-01T10:00:00Z",
+  "updated_at": "2024-12-01T09:15:44Z"
+}
+```
+
+---
+
+## DELETE /v1/resources/\{id\}
+
+Permanently delete a resource. This action cannot be undone. Any webhooks or events associated with the resource are retained for their normal retention period.
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the resource to delete (e.g. `res_abc123`).
+</ParamField>
+
+### Example request
+
+```bash
+curl https://api.ag0.com/v1/resources/res_abc123 \
+  -X DELETE \
+  -H "Authorization: Bearer ag0_sk_abc123"
+```
+
+### Example response
+
+```json
+{
+  "deleted": true,
+  "id": "res_abc123"
+}
+```

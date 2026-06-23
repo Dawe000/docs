@@ -1,0 +1,155 @@
+---
+title: "ag0 Data Model: Resources, Events, and Metadata"
+sidebarTitle: "Data Model"
+description: "Learn about ag0's data model — how resources are structured, what fields every object contains, and how events relate to resources."
+---
+
+Every object in ag0 — whether you create it directly or ag0 generates it automatically — follows a consistent structure. Understanding the data model helps you write integrations that handle responses predictably, store the right fields in your database, and process webhook payloads without surprises. This page covers the shape of resource objects and event objects, explains how metadata works, and describes the ID format used throughout the platform.
+
+## Resource objects
+
+A **resource** is any entity you create and manage through the ag0 API. All resource objects share a common set of fields regardless of their specific type, making it straightforward to build generic handlers for common operations like logging, auditing, or syncing to an external system.
+
+<ResponseField name="id" type="string" required>
+  A globally unique, immutable identifier for the resource. IDs are prefixed strings — for example, `res_abc123`. See [IDs](#ids) for the full prefix reference.
+</ResponseField>
+
+<ResponseField name="type" type="string" required>
+  The resource type, such as `pipeline`, `connector`, or `deployment`. The type is set at creation time and never changes.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  A human-readable label for the resource. Names are mutable — you can update them with a `PATCH` request at any time.
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+  The current lifecycle state of the resource. Possible values are `active`, `inactive`, and `pending`. Newly created resources typically start in `pending` and transition to `active` once provisioning completes.
+</ResponseField>
+
+<ResponseField name="metadata" type="object">
+  A free-form key-value object for attaching your own data to the resource. See [Metadata](#metadata) for constraints and usage guidance.
+</ResponseField>
+
+<ResponseField name="created_at" type="string" required>
+  The ISO 8601 timestamp at which the resource was created, in UTC. Example: `2024-11-01T12:00:00Z`.
+</ResponseField>
+
+<ResponseField name="updated_at" type="string" required>
+  The ISO 8601 timestamp of the most recent update to the resource, in UTC. This field is updated whenever any attribute of the resource changes, including metadata.
+</ResponseField>
+
+**Example resource object**
+
+```json
+{
+  "id": "res_abc123",
+  "type": "pipeline",
+  "name": "data-ingestion-pipeline",
+  "status": "active",
+  "metadata": {
+    "env": "production",
+    "team": "platform",
+    "version": "2"
+  },
+  "created_at": "2024-11-01T12:00:00Z",
+  "updated_at": "2024-11-15T08:42:00Z"
+}
+```
+
+## Event objects
+
+ag0 automatically creates an **event** every time a resource changes state. Events are immutable — once created, they are never modified or deleted. They serve as a complete audit log of everything that has happened to your resources and are the source of truth for webhook payloads.
+
+<ResponseField name="id" type="string" required>
+  A globally unique identifier for the event, prefixed with `evt_`. Example: `evt_xyz789`.
+</ResponseField>
+
+<ResponseField name="type" type="string" required>
+  A dot-separated string describing what happened. The current event types are:
+
+  - `resource.created` — a new resource was successfully created
+  - `resource.updated` — one or more fields on a resource were changed
+  - `resource.deleted` — a resource was deleted
+</ResponseField>
+
+<ResponseField name="resource_id" type="string" required>
+  The ID of the resource this event relates to. Use this field to correlate events with the resources in your own data store.
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  A full snapshot of the resource at the moment the event was recorded. For `resource.deleted` events, this contains the final state of the resource before deletion.
+</ResponseField>
+
+<ResponseField name="created_at" type="string" required>
+  The ISO 8601 timestamp at which the event was recorded, in UTC.
+</ResponseField>
+
+**Example event object**
+
+```json
+{
+  "id": "evt_xyz789",
+  "type": "resource.updated",
+  "resource_id": "res_abc123",
+  "data": {
+    "id": "res_abc123",
+    "type": "pipeline",
+    "name": "data-ingestion-pipeline",
+    "status": "active",
+    "metadata": {
+      "env": "production",
+      "team": "platform",
+      "version": "3"
+    },
+    "created_at": "2024-11-01T12:00:00Z",
+    "updated_at": "2024-11-20T09:15:00Z"
+  },
+  "created_at": "2024-11-20T09:15:00Z"
+}
+```
+
+## Metadata
+
+The `metadata` field on every resource is a free-form JSON object you can use to store custom key-value data alongside your resources — without modifying your own database schema. Common uses include tagging resources with environment names, team ownership, external system IDs, or feature flags.
+
+**Constraints**
+
+- Maximum of **10 keys** per resource
+- All values must be **strings** (numbers and booleans are not accepted)
+- Maximum value length is **500 characters**
+- Keys must be strings; there are no reserved key names
+
+```json
+{
+  "metadata": {
+    "env": "staging",
+    "owner": "platform-team",
+    "external_id": "svc-00421",
+    "deploy_region": "us-east-1"
+  }
+}
+```
+
+You update metadata with a `PATCH` request. The metadata object is merged — keys you include are added or overwritten, and keys you omit are left unchanged. To remove a key, set its value explicitly to `null`.
+
+<Warning>
+  Metadata is not indexed and cannot be used to filter or sort list queries. If you need to query resources by a custom attribute, store that attribute in your own database alongside the `resource_id`.
+</Warning>
+
+## IDs
+
+Every object in ag0 is identified by a **prefixed string ID**. The prefix tells you the object type at a glance, which makes logs, error messages, and debugging significantly easier.
+
+| Prefix | Object type |
+|---|---|
+| `res_` | Resource |
+| `evt_` | Event |
+| `wh_` | Webhook |
+
+IDs are:
+
+- **Globally unique** — no two objects across all ag0 customers share an ID
+- **Immutable** — an ID is assigned at creation time and never changes, even if you rename or move the resource
+- **Opaque** — the characters after the prefix are randomly generated and carry no semantic meaning; do not attempt to parse or sort by ID
+
+Always store IDs as strings in your database — do not cast them to integers. The format and length of the suffix may change in future API versions.
